@@ -8,9 +8,12 @@
     "start": "node server.js",
     "test": "node test/simulate.js"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^4.21.2",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1"
   },
