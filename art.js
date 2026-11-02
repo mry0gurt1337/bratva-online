@@ -1,13 +1,13 @@
 // Портреты персонажей — векторная графика, рисуется кодом (без картинок-файлов).
 (function (root) {
   const CHARS = {
-    boec:      { name: 'Боец',      emoji: '🥊', perk: '+2 к силе на стрелке', bg: ['#3a6df0', '#14204a'], skin: '#e8b48f', hair: 'shaved', outfit: 'track', color: '#1d3fae', extra: ['scar', 'nose'], brow: 'angry', mouth: 'flat' },
-    baryga:    { name: 'Барыга',    emoji: '💰', perk: 'Точки дешевле на 15%', bg: ['#e0a32a', '#4a2c08'], skin: '#d9a07a', hair: 'short', hat: 'flatcap', hatColor: '#4b4038', outfit: 'leather', color: '#2b2522', extra: ['mustache', 'goldtooth'], brow: 'up', mouth: 'grin' },
-    advokat:   { name: 'Адвокат',   emoji: '⚖️', perk: 'Тюрьма не держит, налог −50%', bg: ['#7d8aa3', '#1d2333'], skin: '#efc6a4', hair: 'slick', hairColor: '#2a211c', outfit: 'suit', color: '#2a3550', tie: '#9b1c2e', glasses: 'thin', brow: 'flat', mouth: 'smirk' },
-    shuler:    { name: 'Шулер',     emoji: '🃏', perk: 'Казино: 55% выигрыш, 8% джекпот', bg: ['#a33bd8', '#2a0b3e'], skin: '#e3ae88', hair: 'short', hairColor: '#111', hat: 'fedora', hatColor: '#1d1a20', outfit: 'vest', color: '#5a1730', extra: ['thinmustache'], brow: 'up', mouth: 'smirk' },
-    reshala:   { name: 'Решала',    emoji: '📱', perk: 'Глок не трогает, ОМОН −50%', bg: ['#e2394f', '#3e0a14'], skin: '#e6b391', hair: 'short', hairColor: '#3a2a20', outfit: 'blazer', color: '#b0123a', extra: ['chain'], brow: 'flat', mouth: 'smirk' },
-    buhgalter: { name: 'Бухгалтер', emoji: '📒', perk: '+$60 с каждого Общака', bg: ['#2fb37a', '#0b2e20'], skin: '#f0caa8', hair: 'combover', hairColor: '#6b5a4c', outfit: 'sweater', color: '#5b6e4a', glasses: 'round', brow: 'worry', mouth: 'flat' },
-    gromila:   { name: 'Громила',   emoji: '🦍', perk: 'Братки по $30, до 4 штук', bg: ['#606a74', '#15181c'], skin: '#d29b76', hair: 'none', hat: 'beanie', hatColor: '#24272b', outfit: 'bomber', color: '#1e2a22', extra: ['beard'], brow: 'angry', mouth: 'flat', wide: true },
+    boec:      { name: 'Спортик',      perk: '+2 к силе на стрелке', bg: ['#3a6df0', '#14204a'], skin: '#e8b48f', hair: 'shaved', outfit: 'track', color: '#1d3fae', extra: ['scar', 'nose'], brow: 'angry', mouth: 'flat' },
+    baryga:    { name: 'Барыга',    perk: 'Точки дешевле на 15%', bg: ['#e0a32a', '#4a2c08'], skin: '#d9a07a', hair: 'short', hat: 'flatcap', hatColor: '#4b4038', outfit: 'leather', color: '#2b2522', extra: ['mustache', 'goldtooth'], brow: 'up', mouth: 'grin' },
+    advokat:   { name: 'Адвокат',   perk: 'Тюрьма не держит, налог −50%', bg: ['#7d8aa3', '#1d2333'], skin: '#efc6a4', hair: 'slick', hairColor: '#2a211c', outfit: 'suit', color: '#2a3550', tie: '#9b1c2e', glasses: 'thin', brow: 'flat', mouth: 'smirk' },
+    shuler:    { name: 'Шулер',     perk: 'Казино: выигрыш +50%, видит карту крупье', bg: ['#a33bd8', '#2a0b3e'], skin: '#e3ae88', hair: 'short', hairColor: '#111', hat: 'fedora', hatColor: '#1d1a20', outfit: 'vest', color: '#5a1730', extra: ['thinmustache'], brow: 'up', mouth: 'smirk' },
+    reshala:   { name: 'Блатной',    perk: 'Глок не трогает, ОМОН −50%', bg: ['#e2394f', '#3e0a14'], skin: '#e6b391', hair: 'short', hairColor: '#3a2a20', outfit: 'blazer', color: '#b0123a', extra: ['chain'], brow: 'flat', mouth: 'smirk' },
+    buhgalter: { name: 'Бухгалтер', perk: '+$60 с каждого Общака', bg: ['#2fb37a', '#0b2e20'], skin: '#f0caa8', hair: 'combover', hairColor: '#6b5a4c', outfit: 'sweater', color: '#5b6e4a', glasses: 'round', brow: 'worry', mouth: 'flat' },
+    gromila:   { name: 'Громила',   perk: 'Братки по $30, до 4 штук', bg: ['#606a74', '#15181c'], skin: '#d29b76', hair: 'none', hat: 'beanie', hatColor: '#24272b', outfit: 'bomber', color: '#1e2a22', extra: ['beard'], brow: 'angry', mouth: 'flat', wide: true },
   };
   const GLOK = { name: 'Дима Глок', bg: ['#4f6b45', '#0f160d'], skin: '#e2ad88', hair: 'none', hat: 'beanie', hatColor: '#1b1d22', hatBand: '#d8c27a', outfit: 'tech', color: '#39462f', glasses: 'sun', extra: ['stubble', 'chain', 'toothpick'], brow: 'angry', mouth: 'smirk' };
 

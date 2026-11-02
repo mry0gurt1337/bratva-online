@@ -11,12 +11,14 @@ const { Server } = require('socket.io');
 const QRCode = require('qrcode');
 const store = require('./store.js');
 const tg = require('./tgauth.js');
+const bot = require('./tgbot.js');
 
 // Клиентские файлы лежат в public/ (локально) или прямо рядом с server.js (версия для хостинга без папок)
 const PUB = fs.existsSync(path.join(__dirname, 'public', 'index.html')) ? path.join(__dirname, 'public') : __dirname;
 const G = require(path.join(PUB, 'shared.js'));
 const ART = require(path.join(PUB, 'art.js'));
-const { BOARD, C } = G;
+const { BOARD, C, SHOP, GIFTS, PACKS, BOOST, EARN } = G;
+const PREMIUM = new Set(Object.values(SHOP).filter((x) => x.kind === 'char').map((x) => x.char));
 const CHARS = ART.CHARS;
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -36,11 +38,11 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
-const PUBLIC_RE = /^(index\.html|style\.css|game\.js|sound\.js|shared\.js|art\.js|manifest\.json|icon\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3)$/;
+const PUBLIC_RE = /^(index\.html|style\.css|game\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
 app.get('/:f?', (req, res, next) => {
   const f = req.params.f || 'index.html';
   if (!PUBLIC_RE.test(f)) return next();
-  res.sendFile(path.join(PUB, f), { maxAge: f.endsWith('.mp3') || f.endsWith('.png') ? '7d' : 0 });
+  res.sendFile(path.join(PUB, f), { maxAge: /\.(mp3|png|jpe?g|webp)$/.test(f) ? '7d' : 0 });
 });
 
 function lanIPs() {
@@ -50,6 +52,10 @@ function lanIPs() {
   return out.sort((a, b) => score(a) - score(b));
 }
 app.get('/api/info', (req, res) => res.json({ urls: lanIPs().map((ip) => `http://${ip}:${PORT}`) }));
+app.get('/api/assets', (req, res) => {
+  // картинки, которые положили рядом с игрой (art-*.png/jpg/webp) — подхватываются автоматически
+  try { res.json(fs.readdirSync(PUB).filter((f) => /^art-[a-z0-9-]+\.(png|jpe?g|webp)$/.test(f))); } catch { res.json([]); }
+});
 app.get('/api/config', (req, res) => res.json({ tg: tg.enabled, bot: tg.botUsername, db: store.kind }));
 app.get('/api/qr', async (req, res) => {
   const u = String(req.query.u || '');
@@ -69,6 +75,71 @@ app.post('/api/auth/webapp', (req, res) => {
   if (!prof) return res.status(401).json({ error: 'Telegram не подтвердил вход' });
   res.json({ session: tg.sign(prof), profile: prof });
 });
+// ---------- Кошелёк и магазин ----------
+const wrap = (fn) => (req, res) => fn(req, res).catch((e) => { console.error(req.path, e); res.status(500).json({ error: 'Ошибка сервера, попробуй ещё раз' }); });
+const who = (req) => account(req.body || {});
+const hits = new Map(); // простой лимит запросов на ip
+function limited(req, n = 30) {
+  const k = req.ip + req.path, now = Date.now(), h = hits.get(k) || [];
+  const fresh = h.filter((t) => now - t < 10000); fresh.push(now); hits.set(k, fresh);
+  return fresh.length > n;
+}
+setInterval(() => hits.clear(), 60000).unref();
+
+app.post('/api/me', wrap(async (req, res) => {
+  const a = who(req);
+  if (!a) return res.status(400).json({ error: 'Нет профиля' });
+  res.json({ wallet: await store.wallet(a.key), stats: await store.playerStats(a.key), tg: a.tg, stars: bot.enabled && a.tg });
+}));
+app.post('/api/daily', wrap(async (req, res) => {
+  const a = who(req);
+  if (!a || limited(req, 5)) return res.status(429).json({ error: 'Не так быстро' });
+  res.json(await store.claimDaily(a.key, EARN.daily));
+}));
+app.post('/api/buy', wrap(async (req, res) => {
+  const a = who(req), id = String((req.body || {}).item || '');
+  const it = SHOP[id];
+  if (!a || !it) return res.status(400).json({ error: 'Нет такого товара' });
+  if (limited(req, 10)) return res.status(429).json({ error: 'Не так быстро' });
+  const w = await store.spend(a.key, it.price, id);
+  if (!w) {
+    const cur = await store.wallet(a.key);
+    return res.status(402).json({ error: cur.items.includes(id) ? 'Уже куплено' : `Не хватает монет: нужно ${it.price} монет` });
+  }
+  // сразу надеваем купленное
+  const slot = it.kind === 'char' ? null : it.kind;
+  res.json({ wallet: slot ? await store.setEquip(a.key, slot, id) : w });
+}));
+app.post('/api/equip', wrap(async (req, res) => {
+  const a = who(req), { slot, item } = req.body || {};
+  if (!a || !['frame', 'dice', 'title'].includes(slot)) return res.status(400).json({ error: 'Не тот слот' });
+  const w = await store.wallet(a.key);
+  if (item && (!SHOP[item] || SHOP[item].kind !== slot || !w.items.includes(item))) return res.status(400).json({ error: 'Сначала купи' });
+  res.json({ wallet: await store.setEquip(a.key, slot, item || null) });
+}));
+app.post('/api/stars/invoice', wrap(async (req, res) => {
+  const prof = tg.verify((req.body || {}).session);
+  if (!bot.enabled) return res.status(503).json({ error: 'Оплата ещё не подключена' });
+  if (!prof) return res.status(401).json({ error: 'Войди через Telegram, чтобы купить монеты' });
+  if (limited(req, 6)) return res.status(429).json({ error: 'Не так быстро' });
+  res.json({ link: await bot.invoiceLink(prof, String(req.body.pack || '')) });
+}));
+app.get('/api/terms', (req, res) => res.type('text/plain; charset=utf-8').send(bot.TERMS));
+// Webhook Telegram: проверяем секрет, который сами выдали при setWebhook
+app.post('/tg/hook', (req, res) => {
+  if (req.get('X-Telegram-Bot-Api-Secret-Token') !== bot.HOOK_SECRET) return res.sendStatus(403);
+  bot.handle(req.body || {}).catch((e) => console.error('tg hook', e.message)).finally(() => res.sendStatus(200));
+});
+// Возврат Stars (только для админа): списывает монеты и возвращает звёзды
+app.post('/api/admin/refund', wrap(async (req, res) => {
+  if (!process.env.ADMIN_KEY || req.get('x-admin-key') !== process.env.ADMIN_KEY) return res.sendStatus(403);
+  const p = await store.findPayment(String((req.body || {}).charge || ''));
+  if (!p) return res.status(404).json({ error: 'Платёж не найден' });
+  if (!(await store.spend(p.key, p.coins))) return res.status(409).json({ error: 'Монеты уже потрачены — вернуть нельзя' });
+  await bot.refund(p.charge_id || p.chargeId);
+  res.json({ ok: true });
+}));
+
 app.get('/api/top', async (req, res) => {
   try { res.json({ rows: await store.top(String(req.query.sort || 'wins')), total: await store.count(), db: store.kind }); }
   catch (e) { console.error(e); res.status(500).json({ rows: [] }); }
@@ -99,8 +170,9 @@ function makePlayer(r, name, char, account, bot = false) {
   return {
     id: crypto.randomBytes(4).toString('hex'),
     token: bot ? null : crypto.randomBytes(16).toString('hex'),
-    name, char, icon: CHARS[char].emoji, color: G.COLORS.find((c) => !used.includes(c)) || G.COLORS[0],
+    name, char, color: G.COLORS.find((c) => !used.includes(c)) || G.COLORS[0],
     account: account || null, bot, connected: true, socketId: null,
+    cos: {}, owned: [], wantBoost: false, boosted: false, gifts: 0,
     ...freshStats(),
   };
 }
@@ -111,7 +183,7 @@ const freshStats = () => ({
 
 function newRoom(code) {
   return {
-    code, hostId: null, status: 'LOBBY', settings: { rounds: 20, glok: true }, players: [],
+    code, hostId: null, status: 'LOBBY', settings: { rounds: 20, glok: true, boosts: true }, players: [],
     turn: 0, phase: null, pending: null, props: {}, heat: 0, omon: null, pot: 0,
     logs: [], logSeq: 0, dice: null, lastMove: null, moveSeq: 0, fx: null, fxSeq: 0,
     round: 1, winner: null, standings: null, titles: null, deck: [], sealed: null,
@@ -129,9 +201,11 @@ function publicState(r) {
   return {
     code: r.code, hostId: r.hostId, status: r.status, settings: r.settings,
     players: r.players.map((p) => ({
-      id: p.id, name: p.name, char: p.char, icon: p.icon, color: p.color, money: p.money, auth: p.auth,
+      id: p.id, name: p.name, char: p.char, color: p.color, money: p.money, auth: p.auth,
       goons: p.goons, pos: p.pos, jail: p.jail, bankrupt: p.bankrupt, bot: p.bot,
       connected: p.bot || p.connected, tg: !!(p.account && p.account.tg), photo: p.account && p.account.photo,
+      frame: p.cos.frame || null, dice: p.cos.dice || null, title: p.cos.title || null,
+      boost: p.boosted || p.wantBoost, gifts: p.gifts,
     })),
     turn: r.turn, phase: r.phase, pending: r.pending, props: r.props, heat: r.heat, omon: r.omon, pot: r.pot, inflation: r.inflation || 1,
     logs: r.logs, dice: r.dice, lastMove: r.lastMove, fx: r.fx, round: r.round,
@@ -197,7 +271,7 @@ function doRoll(r) {
   if (r.phase !== 'ROLL') return;
   const p = cur(r);
   const a = d6(), b = d6(), dbl = a === b;
-  r.dice = { a, b, seq: (r.dice ? r.dice.seq : 0) + 1, by: p.id };
+  r.dice = { a, b, seq: (r.dice ? r.dice.seq : 0) + 1, by: p.id, skin: p.cos.dice || null };
   log(r, `${p.name} бросил ${a} + ${b}${dbl ? ' — ДУБЛЬ!' : ''}`, 'dice', { pid: p.id });
   r.phase = 'MOVING';
   r.pending = null;
@@ -252,7 +326,7 @@ function land(r) {
     case 'start':
       if (r.pot > 0) {
         const won = r.pot; r.pot = 0; p.money += won; track(p);
-        log(r, `💰 ${p.name} встал ровно на Общак и забрал джекпот $${won}!`, 'win', { pid: p.id });
+        log(r, `${p.name} встал ровно на Общак и забрал джекпот $${won}!`, 'win', { pid: p.id });
         r.fx = { type: 'pot', pid: p.id, amount: won, seq: ++r.fxSeq };
         return afterAction(r, 1800);
       }
@@ -327,7 +401,7 @@ const CARDS = [
 function drawCard(r, p) {
   if (!r.deck.length) r.deck = shuffle(CARDS.map((_, i) => i));
   const card = CARDS[r.deck.pop()];
-  log(r, `📞 ${p.name}: ${card.t}`, 'card', { pid: p.id });
+  log(r, `${p.name}: ${card.t}`, 'card', { pid: p.id });
   r.fx = { type: 'card', text: card.t, pid: p.id, seq: ++r.fxSeq };
   if (card.move != null) {
     r.phase = 'ANIM';
@@ -372,7 +446,7 @@ function bankrupt(r, p) {
   p.bankrupt = true; p.money = 0; p.jail = 0; p.extra = false;
   for (const [k, v] of Object.entries(r.props)) if (v.owner === p.id) delete r.props[k];
   r.offers = r.offers.filter((o) => o.from !== p.id && o.to !== p.id);
-  log(r, `💀 ${p.name} разорён и выбывает`, 'bankrupt', { pid: p.id });
+  log(r, `${p.name} разорён и выбывает`, 'bankrupt', { pid: p.id });
 }
 function netWorth(r, p) {
   if (p.bankrupt) return 0;
@@ -381,7 +455,100 @@ function netWorth(r, p) {
 }
 
 // ---------- Решения ----------
-const DEFAULTS = { BUY: 'no', UPGRADE: 'no', GYM: 'no', CASINO: 'skip', STRELKA: 'pay', JAIL: 'wait' };
+const DEFAULTS = { BUY: 'no', UPGRADE: 'no', GYM: 'no', CASINO: 'skip', OCHKO: 'stand', STRELKA: 'pay', JAIL: 'wait' };
+
+// ---------- Казино «Три топора» ----------
+// Три игры: однорукий бандит, рулетка, очко (21 на 36 карт). Всё считает сервер.
+const SLOT_SYMS = [['cherry', 30, 3], ['lemon', 25, 4], ['bell', 20, 6], ['diamond', 15, 10], ['seven', 10, 25]];
+const SLOT_NAMES = { cherry: 'вишни', lemon: 'лимона', bell: 'колокола', diamond: 'бриллианта', seven: 'семёрки' };
+const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+const RANKS = [['6', 6], ['7', 7], ['8', 8], ['9', 9], ['10', 10], ['В', 2], ['Д', 3], ['К', 4], ['Т', 11]];
+const SUITS = ['s', 'h', 'd', 'c']; // пики, черви, бубны, трефы
+const cardVal = (c) => RANKS.find(([r]) => r === c.r)[1];
+const handSum = (h) => h.reduce((s, c) => s + cardVal(c), 0);
+const golden = (h) => h.length === 2 && h.every((c) => c.r === 'Т');
+
+function slotSpin() {
+  const total = SLOT_SYMS.reduce((s, x) => s + x[1], 0);
+  const one = () => { let x = rnd(total); for (const sym of SLOT_SYMS) { if ((x -= sym[1]) < 0) return sym; } return SLOT_SYMS[0]; };
+  return [one(), one(), one()];
+}
+// Выплата игроку (прибыль). Шулер получает +50% к выигрышу.
+function casinoWin(r, p, profit, text, extraFx) {
+  if (has(p, 'shuler') && profit > 0) profit = Math.round(profit * 1.5);
+  p.money += profit; track(p); heat(r, 1);
+  log(r, `${p.name}: ${text} — +$${profit}`, 'win', { pid: p.id });
+  return profit;
+}
+function casinoLose(r, p, bet, text) {
+  pay(r, p, bet, null);
+  log(r, `${p.name}: ${text} — −$${bet}`, 'loss', { pid: p.id });
+}
+
+function casinoPlay(r, p, q, choice) {
+  const [game, b, pick] = String(choice).split(':');
+  const bet = Number(b);
+  if (game === 'skip' || !q.bets.includes(bet) || p.money < bet) { log(r, `${p.name} прошёл мимо казино`, 'info'); return 0; }
+  p.st.casino += 1;
+  if (game === 'slots') {
+    const reels = slotSpin();
+    const syms = reels.map((x) => x[0]);
+    let profit = 0, text;
+    if (syms[0] === syms[1] && syms[1] === syms[2]) { profit = bet * (reels[0][2] - 1); text = syms[0] === 'seven' ? 'ТРИ СЕМЁРКИ, ДЖЕКПОТ' : `три ${SLOT_NAMES[syms[0]]}`; }
+    else if (syms[0] === syms[1] || syms[1] === syms[2] || syms[0] === syms[2]) { profit = Math.round(bet * 0.2); text = 'пара на автомате'; }
+    const won = profit > 0 ? casinoWin(r, p, profit, text, {}) : 0;
+    if (!profit) casinoLose(r, p, bet, 'автомат съел ставку');
+    r.fx = { type: 'slots', pid: p.id, bet, reels: syms, won, seq: ++r.fxSeq };
+    return 2300;
+  }
+  if (game === 'roulette') {
+    const color = ['red', 'black', 'zero'].includes(pick) ? pick : 'red';
+    const n = rnd(37);
+    const res = n === 0 ? 'zero' : RED.has(n) ? 'red' : 'black';
+    const name = { red: 'красное', black: 'чёрное', zero: 'зеро' };
+    let won = 0;
+    if (res === color) won = casinoWin(r, p, bet * (color === 'zero' ? 35 : 1), `рулетка, ${n} ${name[res]}`, {});
+    else casinoLose(r, p, bet, `рулетка, выпало ${n} ${name[res]}, а ставил на ${name[color]}`);
+    r.fx = { type: 'roulette', pid: p.id, bet, n, color, res, won, seq: ++r.fxSeq };
+    return 4200;
+  }
+  if (game === 'ochko') {
+    const deck = shuffle(RANKS.flatMap(([rk]) => SUITS.map((st) => ({ r: rk, s: st }))));
+    const hand = [deck.pop(), deck.pop()], dealer = [deck.pop(), deck.pop()];
+    r._ochko = { deck, dealer };
+    log(r, `🃏 ${p.name} сел играть в очко на $${bet}`, 'info', { pid: p.id });
+    if (golden(hand) || handSum(hand) === 21) { r.pending = { type: 'OCHKO', bet, hand, dealer: [dealer[0]] }; return ochkoFinish(r, p, r.pending); }
+    ask(r, { type: 'OCHKO', bet, hand, sum: handSum(hand), dealer: has(p, 'shuler') ? dealer : [dealer[0]], peek: has(p, 'shuler') });
+    return 'ochko';
+  }
+  return 0;
+}
+
+function ochkoStep(r, p, q, choice) {
+  if (choice === 'hit' && r._ochko) {
+    q.hand.push(r._ochko.deck.pop());
+    q.sum = handSum(q.hand);
+    if (q.sum < 21) { ask(r, q); return 'more'; }
+  }
+  return ochkoFinish(r, p, q);
+}
+
+function ochkoFinish(r, p, q) {
+  const o = r._ochko || { dealer: q.dealer, deck: [] };
+  const me = handSum(q.hand), gold = golden(q.hand);
+  let d = handSum(o.dealer);
+  if (me <= 21 || gold) while (d < 17 && o.deck.length) { o.dealer.push(o.deck.pop()); d = handSum(o.dealer); }
+  let result, won = 0;
+  if (gold) { result = 'golden'; won = casinoWin(r, p, Math.round(q.bet * 1.5), 'ЗОЛОТОЕ ОЧКО (два туза)', {}); }
+  else if (me > 21) { result = 'bust'; casinoLose(r, p, q.bet, `перебор ${me}`); }
+  else if (me === 21 && q.hand.length === 2) { result = 'natural'; won = casinoWin(r, p, Math.round(q.bet * 1.5), 'очко с раздачи', {}); }
+  else if (d > 21 || me > d) { result = 'win'; won = casinoWin(r, p, q.bet, `очко ${me} против ${d}`, {}); }
+  else if (me === d) { result = 'push'; log(r, `🃏 ${p.name}: ничья в очко, ${me} на ${d} — ставка вернулась`, 'info', { pid: p.id }); }
+  else { result = 'lose'; casinoLose(r, p, q.bet, `очко ${me} против ${d} у крупье`); }
+  r._ochko = null;
+  r.fx = { type: 'ochko', pid: p.id, bet: q.bet, hand: q.hand, dealer: o.dealer, me, d, result, won, seq: ++r.fxSeq };
+  return 3000;
+}
 function autoAct(r) {
   if (r.status !== 'PLAYING') return;
   const p = cur(r);
@@ -412,7 +579,7 @@ function resolve(r, choice) {
       const c = BOARD[q.cell], pr = r.props[q.cell];
       if (choice === 'yes' && pr && pr.owner === p.id && pr.level < C.MAX_LEVEL && p.money >= c.up) {
         p.money -= c.up; pr.level += 1; heat(r, 1);
-        log(r, `${p.name} прокачал «${c.name}» до ${'★'.repeat(pr.level)}`, 'buy', { pid: p.id });
+        log(r, `${p.name} прокачал «${c.name}» до ${pr.level} ${pr.level === 1 ? 'звезды' : 'звёзд'}`, 'buy', { pid: p.id });
       }
       break;
     }
@@ -423,18 +590,15 @@ function resolve(r, choice) {
       }
       break;
     case 'CASINO': {
-      const bet = Number(choice);
-      if (q.bets.includes(bet) && p.money >= bet) {
-        p.st.casino += 1;
-        const x = rnd(100);
-        const jack = has(p, 'shuler') ? 8 : 5, winAt = has(p, 'shuler') ? 55 : 47;
-        if (x < jack) { p.money += bet * 4; heat(r, 1); log(r, `🎰 ДЖЕКПОТ! ${p.name} сорвал $${bet * 5}`, 'win', { pid: p.id }); }
-        else if (x < winAt) { p.money += bet; heat(r, 1); log(r, `🎰 ${p.name} поднял $${bet * 2} на ставке $${bet}`, 'win', { pid: p.id }); }
-        else { pay(r, p, bet, null); log(r, `🎰 ${p.name} проиграл $${bet} — фишки ушли в Общак`, 'loss', { pid: p.id }); }
-        track(p);
-        r.fx = { type: 'casino', pid: p.id, bet, win: x < winAt, jackpot: x < jack, seq: ++r.fxSeq };
-        delay = 1500;
-      }
+      const d = casinoPlay(r, p, q, choice);
+      if (d === 'ochko') return; // ждём решений в очко
+      delay = d;
+      break;
+    }
+    case 'OCHKO': {
+      const d = ochkoStep(r, p, q, choice);
+      if (d === 'more') return;
+      delay = d;
       break;
     }
     case 'STRELKA': {
@@ -442,7 +606,7 @@ function resolve(r, choice) {
       if (!owner || owner.bankrupt || !pr || pr.owner !== owner.id) break;
       if (choice === 'fight') { strelka(r, p, owner, q); delay = 2600; }
       else {
-        log(r, `${p.name} заплатил $${q.rent} → ${owner.name}`, 'rent', { pid: p.id });
+        log(r, `${p.name} отдал долю $${q.rent}, хозяин — ${owner.name}`, 'rent', { pid: p.id });
         const paid = pay(r, p, q.rent, owner);
         p.st.rentOut += paid; owner.st.rentIn += paid;
       }
@@ -476,12 +640,12 @@ function strelka(r, p, owner, q) {
     pr.owner = p.id; pr.level = Math.max(0, pr.level - 1);
     p.auth += 1; owner.auth = Math.max(0, owner.auth - 1);
     p.st.strelkaWon += 1;
-    log(r, `⚔️ СТРЕЛКА: ${p.name} (${aP}) против ${owner.name} (${oP}) — «${c.name}» отжата!`, 'strelka', { pid: p.id });
+    log(r, `Стрелка: ${p.name} (${aP}) против ${owner.name} (${oP}) — «${c.name}» отжата`, 'strelka', { pid: p.id });
   } else {
     const pen = q.rent * 2;
     p.auth = Math.max(0, p.auth - 1);
     if (p.goons > 0) p.goons -= 1;
-    log(r, `⚔️ СТРЕЛКА: ${p.name} (${aP}) против ${owner.name} (${oP}) — слил, штраф $${pen}`, 'strelka', { pid: p.id });
+    log(r, `Стрелка: ${p.name} (${aP}) против ${owner.name} (${oP}) — слил, штраф $${pen}`, 'strelka', { pid: p.id });
     const paid = pay(r, p, pen, owner);
     owner.st.rentIn += paid;
   }
@@ -512,7 +676,7 @@ function omonStep(r) {
   if (r.omon === null) {
     if (r.heat >= C.MAX_HEAT) {
       r.omon = C.POLICE;
-      log(r, '🚨 ОМОН выехал на облаву!', 'omon');
+      log(r, 'ОМОН выехал на облаву', 'omon');
       omonCheck(r);
     }
     return;
@@ -627,7 +791,7 @@ function maybeGlok(r, cont) {
     if (ev.challenge) return glokChallenge(r, ev.challenge, cont);
     const res = ev.f(r);
     if (!res) continue;
-    log(r, `😎 Дима Глок: ${res.title} — ${res.text}`, 'glok');
+    log(r, `Дима Глок: ${res.title.toLowerCase()} — ${res.text}`, 'glok');
     r.fx = { type: 'glok', title: res.title, text: res.text, line: GLOK_LINES[rnd(GLOK_LINES.length)], seq: ++r.fxSeq };
     r.phase = 'GLOK'; r.pending = null;
     sync(r);
@@ -641,7 +805,7 @@ function glokChallenge(r, kind, cont) {
   const task = { kind, seq: ++r.fxSeq, prize: kind === 'race' ? 150 : 100, ms, taps: [], line: GLOK_LINES[rnd(GLOK_LINES.length)] };
   r.glokTask = task;
   r.phase = 'GLOK'; r.pending = null;
-  log(r, kind === 'race' ? '😎 Дима Глок: кто первый нажмёт — получит $150!' : '😎 Дима Глок раздаёт халяву… подозрительно', 'glok');
+  log(r, kind === 'race' ? 'Дима Глок: кто первый нажмёт — получит $150' : 'Дима Глок раздаёт халяву. Подозрительно', 'glok');
   active(r).filter((p) => p.bot).forEach((p) => {
     if (kind === 'trap' && rnd(100) >= 35) return;
     setTimeout(() => safe(() => glokTap(r, p, task.seq)), T(1200 + rnd(3500)));
@@ -675,7 +839,7 @@ function finishGlok(r) {
     title = 'ЭТО БЫЛА ПОДСТАВА';
     text = losers.length ? `Халявы нет! ${losers.map((p) => p.name).join(', ')} — штраф по $${t.prize}. Ха-ха.` : 'Никто не повёлся. Скучные вы, братва.';
   }
-  log(r, `😎 Дима Глок: ${text}`, 'glok');
+  log(r, `Дима Глок: ${text}`, 'glok');
   r.fx = { type: 'glok', title, text, line: '', seq: ++r.fxSeq, result: true };
   sync(r);
   const cont = r.glokCont; r.glokCont = null;
@@ -701,7 +865,7 @@ function makeOffer(r, from, d) {
   if (r.offers.filter((o) => o.to === to.id).length >= 2) return `${to.name} уже завален предложениями`;
   const offer = { id: crypto.randomBytes(3).toString('hex'), from: from.id, to: to.id, cell, price, mode, until: Date.now() + T(OFFER_MS) };
   r.offers.push(offer);
-  log(r, mode === 'sell' ? `🤝 ${from.name} предлагает ${to.name} купить «${cellName(cell)}» за $${price}` : `🤝 ${from.name} хочет выкупить у ${to.name} «${cellName(cell)}» за $${price}`, 'trade', { pid: from.id });
+  log(r, mode === 'sell' ? `${from.name} предлагает ${to.name} купить «${cellName(cell)}» за $${price}` : `${from.name} хочет выкупить у ${to.name} «${cellName(cell)}» за $${price}`, 'trade', { pid: from.id });
   setTimeout(() => safe(() => {
     if (r.offers.includes(offer)) { r.offers = r.offers.filter((o) => o !== offer); log(r, `Сделка по «${cellName(cell)}» сгорела — не ответили`, 'info'); sync(r); }
   }), T(OFFER_MS));
@@ -723,7 +887,7 @@ function replyOffer(r, p, id, accept) {
   }
   buyer.money -= o.price; seller.money += o.price; track(seller);
   pr.owner = buyer.id;
-  log(r, `🤝 Сделка: ${buyer.name} купил «${cellName(o.cell)}» у ${seller.name} за $${o.price}`, 'trade-ok', { pid: buyer.id });
+  log(r, `Сделка: ${buyer.name} купил «${cellName(o.cell)}» у ${seller.name} за $${o.price}`, 'trade-ok', { pid: buyer.id });
   r.fx = { type: 'deal', seq: ++r.fxSeq, buyer: buyer.id, seller: seller.id, cell: o.cell, price: o.price };
   sync(r);
 }
@@ -753,7 +917,7 @@ function nextTurn(r) {
     r.round += 1;
     // в бесконечной партии со временем начинается беспредел — чтобы игра не тянулась вечно
     const inf = r.settings.rounds ? 1 : r.round >= 40 ? 3 : r.round >= 25 ? 2 : 1;
-    if (inf !== (r.inflation || 1)) { r.inflation = inf; log(r, `🔥 БЕСПРЕДЕЛ: вся рента теперь ×${inf}`, 'omon'); }
+    if (inf !== (r.inflation || 1)) { r.inflation = inf; log(r, `Беспредел: вся рента теперь ×${inf}`, 'omon'); }
     if (r.settings.rounds && r.round > r.settings.rounds) return finish(r, 'rounds');
   }
   r.turn = n;
@@ -772,12 +936,12 @@ function titles(r) {
   const best = (fn, min = 1) => { const s = ps.slice().sort((a, b) => fn(b) - fn(a))[0]; return s && fn(s) >= min ? s : null; };
   const out = [];
   const add = (p, emoji, title, desc) => p && out.push({ pid: p.id, emoji, title, desc });
-  add(best((p) => p.st.strelkaWon), '🔪', 'Отморозок', 'Больше всех отжал на стрелках');
-  add(best((p) => p.st.rentIn, 50), '🏢', 'Рантье', 'Больше всех собрал ренты');
-  add(best((p) => p.st.glok, 50), '🤡', 'Любимчик Глока', 'Больше всех пострадал от Димы');
-  add(best((p) => p.st.casino, 2), '🎰', 'Лудоман', 'Не вылезал из казино');
-  add(best((p) => p.st.jail, 2), '⛓️', 'Сиделец', 'Чаще всех уезжал к ментам');
-  add(best((p) => p.st.maxMoney, 0), '💵', 'Олигарх', 'Самая толстая пачка за игру');
+  add(best((p) => p.st.strelkaWon), 'sword', 'Отморозок', 'Больше всех отжал на стрелках');
+  add(best((p) => p.st.rentIn, 50), 'house', 'Рантье', 'Больше всех собрал ренты');
+  add(best((p) => p.st.glok, 50), 'skull', 'Любимчик Глока', 'Больше всех пострадал от Димы');
+  add(best((p) => p.st.casino, 2), 'slots', 'Лудоман', 'Не вылезал из казино');
+  add(best((p) => p.st.jail, 2), 'c-tyurma', 'Сиделец', 'Чаще всех уезжал к ментам');
+  add(best((p) => p.st.maxMoney, 0), 'coin', 'Олигарх', 'Самая толстая пачка за игру');
   return out;
 }
 
@@ -790,7 +954,7 @@ function finish(r, reason) {
   r.winner = r.standings[0] ? r.standings[0].id : null;
   r.titles = titles(r);
   const w = byId(r, r.winner);
-  log(r, reason === 'rounds' ? `Круги вышли. Самый богатый — ${w ? w.name : '—'}` : `👑 ${w ? w.name : 'Никто'} забрал весь город!`, 'win');
+  log(r, reason === 'rounds' ? `Круги вышли. Самый богатый — ${w ? w.name : '—'}` : `${w ? w.name : 'Никто'} забрал весь город`, 'win');
   sync(r);
   // в топ — только живые игроки, боты не считаются; одиночные партии с ботами тоже идут (по-честному)
   const rows = r.standings.map((s, i) => {
@@ -803,6 +967,15 @@ function finish(r, reason) {
     };
   }).filter(Boolean);
   if (rows.length) store.record(rows).catch((e) => console.error('stats', e.message));
+  // монеты за партию (с дневным лимитом)
+  r.standings.forEach((s, i) => {
+    const p = byId(r, s.id);
+    if (!p || p.bot || !p.account) return;
+    store.credit(p.account.key, EARN.game + (i === 0 ? EARN.win : 0), 'game', EARN.dayCap)
+      .then((n) => { if (n && p.socketId) io.to(p.socketId).emit('earned', { amount: n, win: i === 0 }); })
+      .catch((e) => console.error('earn', e.message));
+  });
+  r.players.forEach((p) => { p.boosted = false; p.wantBoost = false; });
 }
 
 // ---------- Боты ----------
@@ -818,7 +991,13 @@ function botAct(r) {
     case 'BUY': c = p.money - q.price >= 150 ? 'yes' : 'no'; break;
     case 'UPGRADE': c = p.money - q.price >= 300 ? 'yes' : 'no'; break;
     case 'GYM': c = p.goons < 2 && p.money > 350 ? 'yes' : 'no'; break;
-    case 'CASINO': c = p.money > 900 && rnd(2) ? '100' : 'skip'; break;
+    case 'CASINO': {
+      if (p.money < 600 || rnd(3) === 0) { c = 'skip'; break; }
+      const g = ['slots', 'roulette', 'ochko'][rnd(3)];
+      c = g === 'roulette' ? `roulette:${q.bets[0]}:${rnd(2) ? 'red' : 'black'}` : `${g}:${q.bets[0]}`;
+      break;
+    }
+    case 'OCHKO': c = q.sum < 17 ? 'hit' : 'stand'; break;
     case 'STRELKA': {
       const edge = q.my - q.his;
       c = (edge >= 2 && p.money > q.rent * 2) || edge >= 4 ? 'fight' : 'pay';
@@ -837,12 +1016,16 @@ function shuffle(a) {
 // ---------- Комнаты ----------
 function startGame(r) {
   r.players = shuffle(r.players);
-  r.players.forEach((p) => Object.assign(p, freshStats()));
+  r.players.forEach((p) => {
+    Object.assign(p, freshStats());
+    if (p.boosted) p.money = Math.round(C.START_MONEY * (1 + BOOST.pct / 100));
+  });
   Object.assign(r, {
     status: 'PLAYING', turn: 0, props: {}, heat: 0, omon: null, pot: 0, round: 1, inflation: 1,
     winner: null, standings: null, titles: null, dice: null, lastMove: null, fx: null, deck: [],
     sealed: null, glokTask: null, glokCont: null, turnsSinceGlok: 0, offers: [],
   });
+  r.players.filter((p) => p.boosted).forEach((p) => log(r, `${p.name} взял подъёмные: старт $${p.money}`, 'buy', { pid: p.id }));
   log(r, `Замес начался! Первым ходит ${r.players[0].name}`, 'start');
   startTurn(r);
 }
@@ -907,37 +1090,53 @@ io.on('connection', (socket) => {
     bind(r, p);
   });
 
-  function enter(r, d) {
+  async function loadCos(p) {
+    if (!p.account) return;
+    const w = await store.wallet(p.account.key);
+    p.owned = w.items;
+    p.cos = { frame: w.equip.frame, dice: w.equip.dice, title: w.equip.title };
+  }
+  const canUse = (p, ch) => !PREMIUM.has(ch) || p.owned.includes('char-' + ch);
+  async function enter(r, d) {
     const acc = account(d);
     let name = cleanName(acc && acc.tg && !d.name ? acc.name : d.name);
-    if (!name) return err('Введи погоняло');
+    if (!name) { err('Введи погоняло'); return null; }
     if (r.players.some((p) => p.name.toLowerCase() === name.toLowerCase())) name = name.slice(0, 10) + ' ' + (r.players.length + 1);
     const p = makePlayer(r, name, cleanChar(d.char), acc);
+    await loadCos(p).catch(() => {});
+    if (!canUse(p, p.char)) { err(`${CHARS[p.char].name} — премиум-персонаж. Взял Спортика`); p.char = 'boec'; p.icon = null; }
+    if (me) return null; // пока грузились, сокет уже куда-то зашёл
+    if (r.players.length >= C.MAX_PLAYERS) { err('Мест нет'); return null; }
     r.players.push(p);
     if (!r.hostId) r.hostId = p.id;
     tokens.set(p.token, r.code);
     return p;
   }
 
-  on('create', (d) => {
-    if (me) return err('Ты уже в комнате');
+  const onA = (ev, fn) => socket.on(ev, (d) => fn(d && typeof d === 'object' ? d : {}).catch((e) => { console.error('[socket]', ev, e); err('Ошибка, попробуй ещё раз'); }));
+  let entering = false;
+  onA('create', async (d) => {
+    if (me || entering) return err('Ты уже в комнате');
     if (!cleanName(d.name) && !tg.verify(d.session)) return err('Введи погоняло');
+    entering = true;
     const r = newRoom(newCode());
     rooms.set(r.code, r);
-    const p = enter(r, d);
+    const p = await enter(r, d).finally(() => { entering = false; });
     if (!p) return rooms.delete(r.code);
     log(r, `${p.name} собрал сходку`, 'start');
     bind(r, p);
   });
 
-  on('join', (d) => {
-    if (me) return err('Ты уже в комнате');
+  onA('join', async (d) => {
+    if (me || entering) return err('Ты уже в комнате');
     const r = rooms.get(String(d.code || '').trim());
     if (!r) return err('Нет такой сходки — проверь код');
     if (r.status !== 'LOBBY') return err('Игра уже идёт');
     if (r.players.length >= C.MAX_PLAYERS) return err(`Мест нет (макс ${C.MAX_PLAYERS})`);
-    const p = enter(r, d);
+    entering = true;
+    const p = await enter(r, d).finally(() => { entering = false; });
     if (!p) return;
+    if (r.status !== 'LOBBY') { r.players = r.players.filter((x) => x !== p); tokens.delete(p.token); return err('Игра уже идёт'); }
     log(r, `${p.name} примкнул к братве`, 'join');
     bind(r, p);
   });
@@ -967,24 +1166,68 @@ io.on('connection', (socket) => {
 
   on('setChar', ({ char }) => {
     if (!me || me.r.status !== 'LOBBY' || !CHARS[char]) return;
-    me.p.char = char; me.p.icon = CHARS[char].emoji;
+    if (!canUse(me.p, char)) return err(`${CHARS[char].name} открывается в магазине`);
+    me.p.char = char;
     sync(me.r);
   });
 
-  on('settings', ({ rounds, glok }) => {
+  on('settings', ({ rounds, glok, boosts }) => {
     if (!host() || me.r.status !== 'LOBBY') return;
     if ([0, 10, 20, 30].includes(rounds)) me.r.settings.rounds = rounds;
     if (typeof glok === 'boolean') me.r.settings.glok = glok;
+    if (typeof boosts === 'boolean') { me.r.settings.boosts = boosts; if (!boosts) me.r.players.forEach((p) => { p.wantBoost = false; }); }
     sync(me.r);
   });
 
-  on('start', () => {
-    if (!host() || me.r.status !== 'LOBBY') return;
+  // Обновить косметику после покупки в магазине
+  onA('cos', async () => { if (me) { await loadCos(me.p); sync(me.r); } });
+  // «Подъёмные»: отмечаем желание в лобби, монеты списываются при старте
+  onA('boost', async ({ on: want }) => {
+    if (!me || me.r.status !== 'LOBBY') return;
+    if (want && !me.r.settings.boosts) return err('Босс отключил бусты в этой сходке');
+    if (want) {
+      if (!me.p.account) return err('Нужен профиль');
+      const w = await store.wallet(me.p.account.key);
+      if (w.coins < BOOST.price) return err(`Нужно ${BOOST.price} монет — загляни в магазин`);
+    }
+    me.p.wantBoost = !!want;
+    sync(me.r);
+  });
+  let starting = false;
+  onA('start', async () => {
+    if (!host() || me.r.status !== 'LOBBY' || starting) return;
     if (me.r.players.length < 2) return err('Нужно минимум двое');
-    startGame(me.r);
+    starting = true;
+    const r = me.r;
+    try {
+      for (const p of r.players) {
+        p.boosted = false;
+        if (p.wantBoost && r.settings.boosts && p.account) p.boosted = !!(await store.spend(p.account.key, BOOST.price));
+        p.wantBoost = false;
+      }
+      if (r.status === 'LOBBY' && r.players.length >= 2) startGame(r);
+    } finally { starting = false; }
+  });
+  // Подарки: монеты списываются у дарителя, получателю — уважуха в топ
+  let lastGift = 0;
+  onA('gift', async ({ to, gift }) => {
+    if (!me) return;
+    const g = GIFTS.find((x) => x.id === gift), r = me.r, target = byId(r, to);
+    if (!g || !target || target === me.p) return;
+    if (Date.now() - lastGift < 1500) return err('Не так быстро');
+    lastGift = Date.now();
+    if (!me.p.account) return err('Нужен профиль');
+    if (!(await store.spend(me.p.account.key, g.price))) return err(`Не хватает монет: ${g.name} стоит ${g.price} монет`);
+    target.gifts = (target.gifts || 0) + 1;
+    log(r, `${me.p.name} подарил ${target.name}: ${g.name}`, 'gift', { pid: me.p.id });
+    io.to(r.code).emit('gift', { from: me.p.id, to: target.id, gift: g.id });
+    if (target.account) store.addRespect(target.account.key, g.price, target.account.tg ? target.account.name : target.name).catch(() => {});
+    socket.emit('spent', { amount: g.price });
+    sync(r);
   });
 
   on('rematch', () => {
+    if (me) me.r.players.forEach((p) => { p.boosted = false; p.wantBoost = false; });
     if (!host() || me.r.status !== 'GAMEOVER') return;
     const r = me.r;
     r.status = 'LOBBY'; r.phase = null; r.props = {}; r.winner = null; r.standings = null; r.titles = null;
@@ -1059,6 +1302,8 @@ setInterval(() => {
 }, 60000).unref();
 
 store.init().then(() => server.listen(PORT, '0.0.0.0', async () => {
+  const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+  if (bot.enabled) bot.setup(publicUrl, PACKS);
   const urls = lanIPs().map((ip) => `http://${ip}:${PORT}`);
   console.log('\n  БРАТВА — сервер запущен');
   console.log(`  Telegram-вход: ${tg.enabled ? 'включён (@' + tg.botUsername + ')' : 'выключен (нет TELEGRAM_BOT_TOKEN)'}`);

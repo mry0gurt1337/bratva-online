@@ -11,9 +11,13 @@ services:
         value: "22"
       - key: SESSION_SECRET
         generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
       - key: TELEGRAM_BOT_TOKEN
         sync: false
       - key: TELEGRAM_BOT_USERNAME
         sync: false
       - key: DATABASE_URL
+        sync: false
+      - key: SUPPORT_CONTACT
         sync: false
