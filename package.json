@@ -1,0 +1,20 @@
+{
+  "name": "bratva-monopoly",
+  "version": "2.0.0",
+  "description": "БРАТВА — сетевая монополия 90-х. Сервер на твоём ПК, игра в браузере телефона.",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/simulate.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  }
+}
