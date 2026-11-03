@@ -1706,3 +1706,74 @@ body.shake-big .screen.game { animation: shkBig .8s cubic-bezier(.36,.07,.19,.97
 .oy-gem { width: 82%; height: 82%; filter: drop-shadow(0 4px 5px rgba(0,0,0,.55)); }
 .oy-cell.win .oy-gem { filter: drop-shadow(0 0 10px rgba(255,255,255,.7)); }
 .pt-s .oy-gem { width: 100%; height: 100%; }
+.oy-buy { display: grid; grid-template-columns: 1fr auto; grid-template-areas: 't v' 's v'; align-items: center; text-align: left; gap: 0 10px; padding: 9px 14px; border-radius: 14px;
+  background: linear-gradient(90deg, #6b21a8, #a21caf); border: 1px solid #e879f9; box-shadow: 0 0 18px rgba(217,70,239,.35); }
+.oy-buy span { grid-area: t; font-weight: 800; font-size: 14px; letter-spacing: .04em; text-transform: uppercase; }
+.oy-buy small { grid-area: s; font-size: 11px; color: #f5d0fe; }
+.oy-buy b { grid-area: v; font-family: var(--display); font-weight: 400; font-size: 18px; color: #fff; display: inline-flex; align-items: center; }
+.oy-buy:active { transform: scale(.97); }
+@media (max-height: 700px) { .oy-buy { padding: 6px 12px; } .oy-buy small { display: none; } }
+/* выбор ставки */
+.oy-bet div { cursor: pointer; padding: 2px 6px; border-radius: 8px; } .oy-bet div:active { background: rgba(255,255,255,.06); }
+.oy-bets h2 { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 22px; }
+.oy-bgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 10px 0; }
+.oy-bgrid button { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 9px 4px; border-radius: 12px; background: var(--card-bg); border: 1px solid var(--card-bd); }
+.oy-bgrid button b { font-family: var(--display); font-weight: 400; font-size: 15px; color: #7ef0a8; } .oy-bgrid button small { font-size: 10px; color: #a1a1aa; }
+.oy-bgrid button.on { border-color: #f5c542; box-shadow: 0 0 0 1px #f5c542 inset, 0 0 14px rgba(245,197,66,.3); }
+.oy-bgrid button:disabled { opacity: .35; }
+.oy-bq { display: grid; grid-template-columns: 1fr 1.4fr 1.4fr; gap: 6px; } .oy-bq button { padding: 10px 4px; border-radius: 12px; background: #241f2e; font-weight: 800; font-size: 12.5px; }
+/* анимации */
+.oy-frame { overflow: visible; }
+.oy-frame::before { content: ''; position: absolute; inset: -2px; border-radius: 20px; padding: 2px; background: conic-gradient(from var(--ang, 0deg), transparent 0 70%, #fff6c8 80%, transparent 90%); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: frameRun 4s linear infinite; pointer-events: none; }
+@property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes frameRun { to { --ang: 360deg; } }
+.oy-spark { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: #ffd34d; box-shadow: 0 0 6px #ffb020; z-index: 6; pointer-events: none; animation: spark .6s ease-out forwards; }
+@keyframes spark { to { transform: translate(var(--x), var(--y)) scale(.2); opacity: 0; } }
+.oy-zap { position: absolute; left: 50%; top: -40px; width: 70px; height: calc(100% + 40px); margin-left: -35px; z-index: 7; pointer-events: none; animation: zap .6s steps(3) forwards; }
+.oy-zap svg { width: 100%; height: 100%; } .oy-zap path { fill: #fff9d6; filter: drop-shadow(0 0 10px #ffd34d) drop-shadow(0 0 22px #a855f7); }
+@keyframes zap { 0% { opacity: 1; } 50% { opacity: .3; } 70% { opacity: 1; } 100% { opacity: 0; } }
+.oy.flash .oy-grid { animation: gridFlash .5s ease; }
+@keyframes gridFlash { 20% { filter: brightness(1.8); } }
+.oy.tease .oy-frame { animation: tease .3s ease-in-out infinite alternate; }
+@keyframes tease { to { box-shadow: 0 0 40px rgba(80,255,140,.6), 0 20px 40px rgba(0,0,0,.6); } }
+.oy-cell.tease { animation: oyWin .3s ease-in-out infinite alternate; }
+.oy-banner { position: absolute; left: -10px; right: -10px; top: 50%; transform: translateY(-50%); z-index: 8; text-align: center; padding: 16px 10px; background: linear-gradient(90deg, transparent, rgba(60,10,80,.95) 15%, rgba(60,10,80,.95) 85%, transparent); animation: bannerIn .4s cubic-bezier(.2,1.4,.4,1); pointer-events: none; }
+.oy-banner b { display: block; font-family: var(--display); font-weight: 400; font-size: clamp(20px, 6.5vw, 30px); background: linear-gradient(180deg, #fff1b8, #f5c542 45%, #a0640e); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 3px 0 #2a0a3a); }
+.oy-banner small { display: block; margin-top: 2px; font-size: 12px; font-weight: 700; color: #f5d0fe; }
+.oy-banner.end { background: linear-gradient(90deg, transparent, rgba(10,40,25,.95) 15%, rgba(10,40,25,.95) 85%, transparent); }
+.oy-banner.out { opacity: 0; transform: translateY(-50%) scale(.9); transition: .3s; }
+@keyframes bannerIn { from { transform: translateY(-50%) scaleY(0); opacity: 0; } }
+.oy-spin:not(.busy) { animation: spinGlow 2s ease-in-out infinite; }
+@keyframes spinGlow { 50% { box-shadow: 0 0 0 4px #3a2404, 0 0 0 6px #e2b24a, 0 10px 40px rgba(245,197,66,.75); } }
+/* Olympus: экшен */
+.oy { position: relative; }
+.oy.shk .oy-frame { animation: oyShk .35s ease; } .oy.shk2 .oy-frame { animation: oyShk2 .55s ease; }
+@keyframes oyShk { 20% { transform: translate(-3px, 2px); } 40% { transform: translate(3px, -2px); } 60% { transform: translate(-2px, 1px); } 80% { transform: translate(2px, 0); } }
+@keyframes oyShk2 { 10% { transform: translate(-7px, 4px) rotate(-.6deg); } 25% { transform: translate(8px, -5px) rotate(.6deg); } 45% { transform: translate(-6px, 3px); } 65% { transform: translate(4px, -2px); } 85% { transform: translate(-2px, 1px); } }
+.oy-blast { position: absolute; width: 0; height: 0; z-index: 6; pointer-events: none; }
+.oy-blast i { position: absolute; left: 0; top: 0; border-radius: 50%; transform: translate(-50%, -50%); }
+.oy-blast .f { width: 10px; height: 10px; background: radial-gradient(circle, #fff 0, #fff3b0 25%, #ffb020 50%, #ff4d1a 70%, transparent 72%); animation: blF .5s ease-out forwards; }
+.oy-blast .w { width: 10px; height: 10px; border: 2px solid rgba(255,230,160,.9); animation: blW .5s ease-out forwards; }
+.oy-blast .d { width: 4px; height: 4px; border-radius: 1px; background: #ffd34d; box-shadow: 0 0 5px #ff9a1a; animation: blD .6s ease-out forwards; }
+.oy-blast.big .f { animation-name: blFb; } .oy-blast.big .w { animation-name: blWb; }
+@keyframes blF { 50% { width: 64px; height: 64px; opacity: 1; } 100% { width: 80px; height: 80px; opacity: 0; } }
+@keyframes blFb { 50% { width: 110px; height: 110px; opacity: 1; } 100% { width: 130px; height: 130px; opacity: 0; } }
+@keyframes blW { to { width: 90px; height: 90px; opacity: 0; border-width: 1px; } }
+@keyframes blWb { to { width: 160px; height: 160px; opacity: 0; border-width: 1px; } }
+@keyframes blD { to { transform: translate(-50%, -50%) rotate(var(--a)) translateY(calc(var(--l) * -1)); opacity: 0; } }
+.oy-cell.land { animation: land .5s ease; }
+@keyframes land { 0% { transform: scale(1.35); filter: brightness(2); } 100% { transform: none; } }
+.oy-combo { position: absolute; right: 6px; top: 6px; z-index: 9; text-align: center; padding: 4px 10px; border-radius: 12px; background: rgba(0,0,0,.6); border: 1px solid #f5c542; animation: comboIn .9s ease forwards; pointer-events: none; }
+.oy-combo small { display: block; font-size: 9px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: #fde68a; }
+.oy-combo b { font-family: var(--display); font-weight: 400; font-size: 26px; color: #fff; text-shadow: 0 0 12px #f5c542; }
+.oy-combo.c3 b { color: #ffb020; } .oy-combo.c4 b { color: #ff6b3d; } .oy-combo.c5 b { color: #ff3df2; font-size: 32px; }
+@keyframes comboIn { 0% { transform: scale(2.2) rotate(-12deg); opacity: 0; } 20% { transform: scale(1) rotate(-4deg); opacity: 1; } 75% { opacity: 1; } 100% { transform: translateY(-14px); opacity: 0; } }
+.oy-say { position: absolute; left: 50%; top: 100%; transform: translateX(-90%); margin-top: -6px; z-index: 9; white-space: nowrap; background: #fff; color: #16121a; font-size: 12px; font-weight: 800; padding: 5px 10px; border-radius: 11px; box-shadow: 0 6px 14px rgba(0,0,0,.5); animation: pop .25s ease; pointer-events: none; }
+.oy-win.pump { animation: pump .8s ease; } @keyframes pump { 30% { transform: scale(1.5); text-shadow: 0 0 30px rgba(126,240,168,.9); } }
+.oy-fw { position: absolute; width: 0; height: 0; z-index: 60; pointer-events: none; }
+.oy-fw i { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); animation: fw 1s cubic-bezier(.1,.7,.3,1) forwards; }
+@keyframes fw { 0% { transform: rotate(var(--a)) translateY(0); opacity: 1; } 70% { opacity: 1; } 100% { transform: rotate(var(--a)) translateY(-90px) translateX(6px); opacity: 0; } }
+.oy-blast .f { width: 40px; height: 40px; }
+@keyframes blF { 0% { width: 30px; height: 30px; } 45% { width: 72px; height: 72px; opacity: 1; } 100% { width: 86px; height: 86px; opacity: 0; } }
+@keyframes blFb { 0% { width: 40px; height: 40px; } 45% { width: 120px; height: 120px; opacity: 1; } 100% { width: 140px; height: 140px; opacity: 0; } }
+.oy-combo { top: -18px; right: -6px; }

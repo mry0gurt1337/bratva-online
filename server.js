@@ -122,20 +122,20 @@ app.post('/api/spin', wrap(async (req, res) => {
   res.json({ prize, wallet: await store.wallet(a.key) });
 }));
 // Bratva Olympus — на «бабки» (бесплатная валюта, не покупается)
-const OLY_BETS = [10, 20, 50, 100, 200, 500, 1000, 2500];
+const OLY_BETS = [10, 20, 30, 50, 75, 100, 150, 200, 300, 500, 750, 1000, 1500, 2500, 5000, 10000];
 app.post('/api/olympus', wrap(async (req, res) => {
   const a = who(req);
   if (!a) return res.status(400).json({ error: 'Нужен профиль' });
   if (limited(req, 40)) return res.status(429).json({ error: 'Не так быстро' });
-  const bet = Number((req.body || {}).bet), ante = !!(req.body || {}).ante;
+  const bet = Number((req.body || {}).bet), buy = !!(req.body || {}).buy, ante = !buy && !!(req.body || {}).ante;
   if (!OLY_BETS.includes(bet)) return res.status(400).json({ error: 'Нет такой ставки' });
-  const cost = Math.round(bet * (ante ? 1.25 : 1));
+  const cost = Math.round(bet * (buy ? OLY.BUY_PRICE : ante ? 1.25 : 1));
   const left = await store.bucksAdd(a.key, -cost);
   if (left == null) {
     const refill = await store.bucksRefill(a.key, G.DURAK.refillBelow, G.DURAK.refillTo);
     return res.status(402).json({ error: refill != null ? `Подъёмные: на счету снова ${refill} бабок` : `Не хватает бабок: нужно ${cost}`, bank: refill });
   }
-  const r = OLY.play(ante);
+  const r = OLY.play(ante, buy);
   const win = Math.round(r.x * bet);
   const bank = win ? await store.bucksAdd(a.key, win) : left;
   res.json({ r, bet, cost, win, bank });

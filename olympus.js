@@ -75,8 +75,10 @@ function spin(fs, ante) {
 }
 
 // Полная игра: базовый спин + бонус, если выпал. Всё в ставках (x).
-function play(ante = false) {
-  const base = spin(false, ante);
+// buy = купленный бонус: базовый спин гарантированно с 4+ Общаками
+function play(ante = false, buy = false) {
+  let base = spin(false, ante);
+  for (let k = 0; buy && base.scat < 4 && k < 20000; k++) base = spin(false, false);
   let total = base.win * (base.win && base.multSum ? base.multSum : 1);
   const scatPay = SCATTER_PAY[Math.min(6, base.scat)] || 0;
   total += scatPay;
@@ -103,12 +105,13 @@ function play(ante = false) {
   return res;
 }
 
-module.exports = { play, spin, PAY, SCATTER_PAY, COLS, ROWS, MAX_WIN, CFG, W };
+const BUY_PRICE = 72; // средний бонус ≈ ×69 — цена держит отдачу около 95%
+module.exports = { BUY_PRICE, play, spin, PAY, SCATTER_PAY, COLS, ROWS, MAX_WIN, CFG, W };
 
 if (require.main === module) {
-  const N = Number(process.argv[2]) || 300000, ante = process.argv[3] === 'ante';
+  const N = Number(process.argv[2]) || 300000, ante = process.argv[3] === 'ante', buy = process.argv[3] === 'buy';
   let tot = 0, hits = 0, fs = 0, big = 0, max = 0, fsTot = 0;
-  for (let i = 0; i < N; i++) { const r = play(ante); tot += r.x; if (r.x > 0) hits++; if (r.fs) { fs++; fsTot += r.fs.total; } if (r.x >= 100) big++; if (r.x > max) max = r.x; }
-  const cost = ante ? 1.25 : 1;
+  for (let i = 0; i < N; i++) { const r = play(ante, buy); tot += r.x; if (r.x > 0) hits++; if (r.fs) { fs++; fsTot += r.fs.total; } if (r.x >= 100) big++; if (r.x > max) max = r.x; }
+  const cost = buy ? BUY_PRICE : ante ? 1.25 : 1;
   console.log(`спинов ${N}${ante ? ' (повышенная ставка)' : ''}: отдача ${(100 * tot / N / cost).toFixed(2)}%, выигрышных ${(100 * hits / N).toFixed(1)}%, бонус раз в ${(N / Math.max(1, fs)).toFixed(0)}, средний бонус x${(fsTot / Math.max(1, fs)).toFixed(1)}, x100+ раз в ${(N / Math.max(1, big)).toFixed(0)}, максимум x${max}`);
 }
