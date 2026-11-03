@@ -559,6 +559,7 @@ function cellHTML(c) {
 
 function buildGame() {
   syncSeen();
+  updateGame.np = null;
   app.innerHTML = `
   <section class="screen game">
     <header class="topbar">
@@ -618,6 +619,24 @@ function buildGame() {
 function updSound() { const b = $('#snd'); if (b) b.innerHTML = ic(SFX.on ? 'sound' : 'mute'); }
 function setConn(ok) { const c = $('#conn'); if (c) c.classList.toggle('bad', !ok); if (!ok && st) toast('Связь потеряна, переподключаюсь…'); }
 
+// Размер поля считаем по факту: поле максимально большое, но игроки, лента и чат всегда помещаются
+function fitBoard() {
+  const lay = $('.layout'), bw = $('.board-wrap');
+  if (!lay || !bw) return;
+  const wide = innerWidth >= 640 && innerWidth / innerHeight >= 1;
+  const H = lay.clientHeight, W = lay.clientWidth;
+  let size;
+  if (wide) size = Math.min(H, W - Math.min(460, Math.max(300, W * 0.32)) - 8);
+  else {
+    const pl = $('#players') ? $('#players').offsetHeight : 60;
+    const feedMin = innerHeight < 700 ? 150 : innerWidth >= 600 ? 210 : 190;
+    size = Math.min(W, H - pl - feedMin - 16);
+  }
+  bw.style.width = Math.max(240, Math.floor(size)) + 'px';
+}
+addEventListener('resize', () => requestAnimationFrame(fitBoard));
+addEventListener('orientationchange', () => setTimeout(fitBoard, 300));
+
 function updateGame() {
   const mine = curP() && curP().id === myId, cp = curP();
   $('#round').textContent = `Круг ${st.round}${st.settings.rounds ? ' / ' + st.settings.rounds : ''}`;
@@ -658,7 +677,8 @@ function updateGame() {
   const counts = {};
   Object.values(st.props).forEach((v) => { counts[v.owner] = (counts[v.owner] || 0) + 1; });
   const n = st.players.length;
-  $('#players').style.setProperty('--n', n <= 4 ? n : 3);
+  $('#players').style.setProperty('--n', n);
+  $('#players').dataset.n = n;
   $('#players').innerHTML = st.players.map((p, i) => {
     const delta = prevMoney[p.id] != null ? p.money - prevMoney[p.id] : 0;
     return `<div class="pc ${i === st.turn ? 'turn' : ''} ${p.bankrupt ? 'dead' : ''} ${p.id === myId ? 'me' : ''}" style="--c:${p.color}" data-pid="${p.id}">
@@ -671,6 +691,7 @@ function updateGame() {
     </div>`;
   }).join('');
   st.players.forEach((p) => { prevMoney[p.id] = p.money; });
+  if (updateGame.np !== st.players.length) { updateGame.np = st.players.length; requestAnimationFrame(fitBoard); }
   const turnCard = $('.pc.turn'), pl = $('#players');
   if (turnCard && pl.scrollWidth > pl.clientWidth) pl.scrollTo({ left: turnCard.offsetLeft - 8, behavior: 'smooth' });
 
@@ -699,8 +720,83 @@ function updateGame() {
 
   if (mine && st.phase === 'DECIDE' && st.pending) openSheet(st.pending);
   else closeSheet();
+  if (st.status === 'PLAYING') { showTutorial(); hintsFor(mine); }
 
   if (meNow && meNow.bankrupt && !$('.spectator')) $('#status').insertAdjacentHTML('afterend', '<div class="spectator">ты разорён — смотришь игру</div>');
+}
+
+// ---------- Обучение и подсказки ----------
+const TUT = [
+  ['crown', 'Цель', 'Стань самым богатым к концу кругов — или останься последним, кто не разорился.'],
+  ['dice', 'Ход', 'Бросаешь кости и идёшь по кругу. Свободную точку покупаешь — с каждого, кто на неё встанет, берёшь долю.'],
+  ['sword', 'Чужая точка', 'Платишь долю хозяину — или забиваешь стрелку: кубик + сила. Выиграл — точка твоя, проиграл — штраф.'],
+  ['siren', 'Опасности', 'Покупки и стрелки поднимают розыск. На 5 огнях выезжает ОМОН. А Дима Глок раздаёт деньги — иногда честно, иногда это подстава.'],
+];
+const TIPS = {
+  roll: ['dice', 'Твой ход', 'Жми «Бросить кости». Фишка пройдёт столько клеток, сколько выпало. Дубль — ходишь ещё раз.'],
+  BUY: ['house', 'Свободная точка', 'Купи — и каждый, кто сюда встанет, заплатит тебе долю. Весь район одного цвета — доля ×2.'],
+  UPGRADE: ['star', 'Прокачка', 'Каждая звезда удваивает долю с точки. Но розыск растёт.'],
+  GYM: ['fist', 'Качалка', 'Браток даёт +1 силы на стрелке и садится вместо тебя, если накроет ОМОН.'],
+  CASINO: ['slots', 'Казино', 'Ставки — только игровые $. Можно спокойно пройти мимо.'],
+  STRELKA: ['sword', 'Чужая точка', 'Заплати долю или забей стрелку: кубик + твоя сила против его. Выиграешь — точка твоя, проиграешь — штраф ×2.'],
+  JAIL: ['lock', 'Тюрьма', 'Занеси залог и ходи сразу — или отсиди один ход бесплатно.'],
+  heat: ['flame', 'Розыск растёт', 'Огоньки в центре поля — это розыск. На пятом выезжает ОМОН и едет против хода.'],
+  omon: ['siren', 'ОМОН на поле', 'Мигалка едет навстречу. Кого накроет — штраф. Если есть браток — он сядет вместо тебя.'],
+  glok: ['bolt', 'Раздача Глока', 'Кто первый нажмёт — заберёт деньги. Но это может быть подстава. Рискнёшь?'],
+  card: ['chat', 'Звонок с зоны', 'Случайное событие: деньги, переезд или неприятности.'],
+  offer: ['deal', 'Тебе предлагают сделку', 'Посмотри цену и жми «Да» или «Нет», пока не вышло время.'],
+  trade: ['deal', 'Сделки', 'Кнопка с рукопожатием наверху — продай свою точку или выкупи чужую.'],
+};
+const tipsSeen = new Set(LS.get('bratva_tips', []));
+let tipsOff = !!LS.get('bratva_tips_off', false), tipQ = [], tipEl = null;
+function tip(key) {
+  if (tipsOff || tipsSeen.has(key) || !TIPS[key] || $('.tut')) return;
+  tipsSeen.add(key); LS.set('bratva_tips', [...tipsSeen]);
+  tipQ.push(key); if (!tipEl) nextTip();
+}
+function nextTip() {
+  const key = tipQ.shift();
+  if (!key) { tipEl = null; return; }
+  const [i, t, d] = TIPS[key];
+  tipEl = document.createElement('div');
+  tipEl.className = 'tip';
+  tipEl.innerHTML = `<span class="tip-ic">${ic(i)}</span><div class="tip-t"><b>${t}</b><span>${d}</span></div><button class="tip-x" aria-label="Понятно">${ic('check')}</button>`;
+  document.body.appendChild(tipEl);
+  requestAnimationFrame(() => tipEl && tipEl.classList.add('show'));
+  const el = tipEl, close = () => { el.classList.remove('show'); setTimeout(() => { el.remove(); if (tipEl === el) nextTip(); }, 250); };
+  el.onclick = close;
+  setTimeout(close, 1500 + d.split(' ').length * 330);
+}
+function showTutorial(force) {
+  if (!force && LS.get('bratva_tut', false)) return;
+  LS.set('bratva_tut', true);
+  let i = 0;
+  const box = document.createElement('div');
+  box.className = 'overlay show tut';
+  const draw = () => {
+    const [icn, t, d] = TUT[i];
+    box.innerHTML = `<div class="tut-card"><div class="tut-step">${i + 1} / ${TUT.length}</div><div class="tut-ic">${ic(icn)}</div><h3>${t}</h3><p>${d}</p>
+      <div class="tut-dots">${TUT.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div>
+      <div class="tut-btns"><button class="btn" data-t="skip">Пропустить</button><button class="btn gold" data-t="next">${i < TUT.length - 1 ? 'Дальше' : 'Погнали'}</button></div></div>`;
+    $('[data-t="next"]', box).onclick = (e) => { e.stopPropagation(); if (++i < TUT.length) draw(); else done(); };
+    $('[data-t="skip"]', box).onclick = (e) => { e.stopPropagation(); done(); };
+  };
+  const done = () => { box.classList.remove('show'); setTimeout(() => box.remove(), 250); };
+  draw();
+  document.body.appendChild(box);
+}
+function hintsFor(mine) {
+  if (st.status !== 'PLAYING') return;
+  const meNow = meP();
+  if (!meNow || meNow.bankrupt) return;
+  if (mine && st.phase === 'ROLL') tip('roll');
+  if (mine && st.phase === 'DECIDE' && st.pending && TIPS[st.pending.type]) tip(st.pending.type);
+  if (st.heat >= 3) tip('heat');
+  if (st.omon != null) tip('omon');
+  if (st.glokTask) tip('glok');
+  if (st.fx && st.fx.type === 'card' && st.fx.pid === myId) tip('card');
+  if ((st.offers || []).some((o) => o.to === myId)) tip('offer');
+  if (st.round >= 3) tip('trade');
 }
 
 function pendingText(q) {
@@ -722,25 +818,25 @@ function updateGlokTask() {
   if (!t) return closeGlokTask();
   if (t.seq === glokSeq && glokEl) {
     const b = $('.glok-btn', glokEl);
-    if (b && t.taps.includes(myId)) { b.disabled = true; b.textContent = t.kind === 'race' ? 'Нажал! Ждём…' : 'Ну-ну…'; }
+    if (b && t.taps.includes(myId)) { b.disabled = true; b.textContent = 'Нажал! Ждём…'; }
     return;
   }
   closeGlokTask();
   glokSeq = t.seq;
-  const mp = meP(), dead = !mp || mp.bankrupt, isRace = t.kind === 'race';
+  const mp = meP(), dead = !mp || mp.bankrupt;
   SFX.play('glok'); SFX.vibe([100, 60, 100]);
   flash('ДИМА ГЛОК ПРИШЁЛ', 'glok');
   glokEl = document.createElement('div');
   glokEl.className = 'overlay show glok-task';
   glokEl.innerHTML = glokCard(`
     <div class="glok-line">«${esc(t.line)}»</div>
-    <div class="glok-title">${isRace ? 'КТО ПЕРВЫЙ — ТОМУ $' + t.prize : 'ХАЛЯВА ОТ ДИМЫ'}</div>
-    <div class="glok-text">${isRace ? 'Жми кнопку быстрее всех. Тормозам — ничего.' : 'Дима сегодня щедрый. Бери, пока дают… или не надо?'}</div>
-    <button class="btn ${isRace ? 'gold' : 'red'} big glok-btn" ${dead ? 'disabled' : ''}>${isRace ? 'Я ЗДЕСЬ!' : 'ЗАБРАТЬ $200'}</button>
+    <div class="glok-title">КТО ПЕРВЫЙ — ТОМУ $${t.prize}</div>
+    <div class="glok-text">Дима раздаёт. Может, честно. А может, и нет — с Глоком никогда не знаешь.</div>
+    <button class="btn gold big glok-btn" ${dead ? 'disabled' : ''}>ЗАБРАТЬ $${t.prize}</button>
     <div class="sh-timer"><i class="glok-bar" style="animation-duration:${t.ms}ms"></i></div>`);
   document.body.appendChild(glokEl);
   const btn = $('.glok-btn', glokEl);
-  btn.onclick = () => { socket.emit('glok', { seq: t.seq }); btn.disabled = true; SFX.play('click'); SFX.vibe(20); btn.textContent = isRace ? 'Нажал! Ждём…' : 'Ну-ну…'; };
+  btn.onclick = () => { socket.emit('glok', { seq: t.seq }); btn.disabled = true; SFX.play('click'); SFX.vibe(20); btn.textContent = 'Нажал! Ждём…'; };
 }
 function closeGlokTask() {
   if (glokEl) { const e = glokEl; e.classList.remove('show'); setTimeout(() => e.remove(), 250); glokEl = null; }
@@ -1023,7 +1119,7 @@ function bubble(pid, text) {
   b.className = 'bubble';
   b.textContent = text;
   host.appendChild(b);
-  setTimeout(() => b.remove(), 2600);
+  setTimeout(() => b.remove(), 4000);
 }
 
 // ---------- Эффекты ----------
@@ -1070,12 +1166,16 @@ function showFx(fx) {
   }
 }
 
+const READ = 1.6; // во сколько раз дольше держим всплывающие сцены
 function overlay(html, ms) {
   const ov = document.createElement('div');
   ov.className = 'overlay';
   ov.innerHTML = html;
   document.body.appendChild(ov);
   requestAnimationFrame(() => ov.classList.add('show'));
+  // время показа зависит от объёма текста — чтобы успеть прочитать
+  const words = (ov.textContent || '').trim().split(/\s+/).length;
+  ms = Math.min(7000, Math.max(Math.round(ms * READ), 1600 + words * 230));
   setTimeout(() => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 300); }, ms);
   ov.onclick = () => ov.remove();
   return ov;
@@ -1085,7 +1185,7 @@ function flash(text, cls) {
   f.className = 'flash ' + cls;
   f.textContent = text;
   document.body.appendChild(f);
-  setTimeout(() => f.remove(), 1800);
+  setTimeout(() => f.remove(), 2800);
 }
 
 // ---------- Окно решения ----------
@@ -1196,7 +1296,9 @@ function showMenu() {
     <button class="btn" data-a="shop">${ic('cart')}Магазин</button>
     <button class="btn" data-a="trade">${ic('deal')}Предложить сделку</button>
     <button class="btn" data-a="chars">${ic('masks')}Кто есть кто</button>
-    <button class="btn" data-a="rules">${ic('book')}Как играть</button>
+    <button class="btn" data-a="rules">${ic('book')}Правила</button>
+    <button class="btn" data-a="tut">${ic('bolt')}Обучение</button>
+    <button class="btn" data-a="tips">${ic('chat')}${tipsOff ? 'Включить подсказки' : 'Выключить подсказки'}</button>
     <button class="btn" data-a="sound">${SFX.on ? ic('mute') + 'Выключить звук' : ic('sound') + 'Включить звук'}</button>
     <button class="btn" data-a="link">${ic('link')}Ссылка на игру</button>
     <button class="btn red" data-a="quit">${ic('flag')}Сдаться и выйти</button>
@@ -1208,6 +1310,8 @@ function showMenu() {
     if (a === 'shop') renderShop('coins');
     if (a === 'chars') showChars();
     if (a === 'rules') showRules();
+    if (a === 'tut') showTutorial(true);
+    if (a === 'tips') { tipsOff = !tipsOff; LS.set('bratva_tips_off', tipsOff); if (!tipsOff) { tipsSeen.clear(); LS.set('bratva_tips', []); } toast(tipsOff ? 'Подсказки выключены' : 'Подсказки включены'); }
     if (a === 'sound') { SFX.on = !SFX.on; updSound(); }
     if (a === 'link') copyText(`${shareUrl}/?room=${st.code}`);
     if (a === 'quit' && confirm('Точно сдаться? Твои точки уйдут банку.')) socket.emit('leave');
@@ -1228,7 +1332,7 @@ function showRules() {
     <p><b>Сделки</b> — в любой момент можно продать свою точку или выкупить чужую, кнопка сделки вверху экрана.</p>
     <p><b>Персонажи.</b> Спортик сильнее на стрелках, Барыга покупает дешевле, Адвокат не сидит, Шулер везуч в казино, Блатной неприкасаем для Глока, Бухгалтер получает больше с Общака, Громила нанимает братков за полцены.</p>
     <p><b>Розыск</b> растёт от покупок, прокачек, стрелок и казино. На пятом огоньке выезжает ОМОН. Кого накроет — штраф или минус браток.</p>
-    <p><b>Дима Глок</b> — смотрящий за районом. Приходит когда захочет: шмонает богатых, путает бабки, гоняет всех назад, закрывает точки, обносит джекпот и даёт задания. Иногда кнопку надо жать быстрее всех, а иногда это подстава.</p>
+    <p><b>Дима Глок</b> — смотрящий за районом. Приходит когда захочет: шмонает богатых, путает бабки, гоняет всех назад, закрывает точки, обносит джекпот и раздаёт деньги: «кто первый нажмёт — заберёт». Выглядит всегда одинаково, но внутри может быть подстава: штраф, меченые купюры (сразу в тюрьму), развод на братка. Чем дольше игра, тем больше подстав.</p>
     <p><b>Победа</b> — последний оставшийся или самый богатый, когда кончатся круги. Результаты идут в топ братвы.</p>
   </div>`);
 }
@@ -1447,7 +1551,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastT);
-  toastT = setTimeout(() => t.classList.remove('show'), 2400);
+  toastT = setTimeout(() => t.classList.remove('show'), 3400);
 }
 function copyText(text) {
   const ok = () => toast('Ссылка скопирована');

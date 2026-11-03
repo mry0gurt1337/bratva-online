@@ -24,6 +24,9 @@ const CHARS = ART.CHARS;
 const PORT = Number(process.env.PORT) || 3000;
 const SPEED = process.env.FAST ? 0.02 : 1; // FAST=1 — ускоренный режим для тестов
 const T = (x) => Math.max(1, Math.round(x * SPEED));
+// Темп партии: чтобы игроки успевали прочитать, что произошло
+const PACE = 1.6;   // все паузы «показать результат» длиннее в 1.6 раза
+const BEAT = 1300;  // минимальная пауза после любого хода перед передачей хода
 const TURN_MS = 45000;      // время на ход
 const OFFLINE_MS = 12000;   // если игрок отвалился — ждём меньше
 const N = C.N;
@@ -211,7 +214,7 @@ function publicState(r) {
     logs: r.logs, dice: r.dice, lastMove: r.lastMove, fx: r.fx, round: r.round,
     winner: r.winner, standings: r.standings, titles: r.titles, sealed: r.sealed,
     offers: r.offers.map(({ id, from, to, cell, price, mode, until }) => ({ id, from, to, cell, price, mode, ms: Math.max(0, until - Date.now()) })),
-    glokTask: r.glokTask ? { kind: r.glokTask.kind, seq: r.glokTask.seq, prize: r.glokTask.prize, ms: T(r.glokTask.ms), line: r.glokTask.line, taps: r.glokTask.taps } : null,
+    glokTask: r.glokTask ? { seq: r.glokTask.seq, prize: r.glokTask.prize, ms: T(r.glokTask.ms), line: r.glokTask.line, taps: r.glokTask.taps } : null,
     remaining: r.deadline ? Math.max(0, r.deadline - Date.now()) : null, total: r.deadlineTotal,
   };
 }
@@ -244,7 +247,7 @@ const track = (p) => { p.st.maxMoney = Math.max(p.st.maxMoney, p.money); };
 
 function armTimer(r) {
   const p = cur(r);
-  if (p.bot) return later(r, T(900 + rnd(700)), () => botAct(r));
+  if (p.bot) return later(r, T(1700 + rnd(1100)), () => botAct(r));
   withDeadline(r, T(p.connected ? TURN_MS : OFFLINE_MS), () => autoAct(r));
 }
 
@@ -281,15 +284,15 @@ function doRoll(r) {
       p.doubles = 0; p.extra = false;
       log(r, `Три дубля подряд — ${p.name} привлёк внимание ментов`, 'police', { pid: p.id });
       sync(r);
-      return later(r, T(1100), () => { sendToJail(r, p); afterAction(r); });
+      return later(r, T(2200), () => { sendToJail(r, p); afterAction(r); });
     }
     p.extra = true;
   } else { p.doubles = 0; p.extra = false; }
   const from = p.pos, steps = a + b;
   moveBy(r, p, steps);
-  r.lastMove = { pid: p.id, from, steps, seq: ++r.moveSeq, delay: 700 };
+  r.lastMove = { pid: p.id, from, steps, seq: ++r.moveSeq, delay: 1000 };
   sync(r);
-  later(r, T(700 + steps * C.HOP_MS + 250), () => land(r));
+  later(r, T(1000 + steps * C.HOP_MS + 600), () => land(r));
 }
 
 function sendToJail(r, p) {
@@ -406,16 +409,16 @@ function drawCard(r, p) {
   if (card.move != null) {
     r.phase = 'ANIM';
     sync(r);
-    return later(r, T(1700), () => {
+    return later(r, T(3200), () => {
       const from = p.pos, steps = (card.move - from + N) % N;
       moveBy(r, p, steps);
       r.lastMove = { pid: p.id, from, steps, seq: ++r.moveSeq, delay: 0 };
       sync(r);
-      later(r, T(steps * C.HOP_MS + 300), () => land(r));
+      later(r, T(steps * C.HOP_MS + 600), () => land(r));
     });
   }
   card.f(r, p); track(p);
-  afterAction(r, 1700);
+  afterAction(r, 2000);
 }
 
 // ---------- Деньги и банкротство ----------
@@ -651,12 +654,14 @@ function strelka(r, p, owner, q) {
   }
 }
 
-function afterAction(r, delay = 0) {
+function afterAction(r, delay = 0, paused = false) {
   if (r.status !== 'PLAYING') return;
-  if (delay) {
+  if (!paused) {
+    // всегда даём секунду-две посмотреть результат хода
+    delay = Math.max(Math.round(delay * PACE), BEAT);
     r.phase = 'ANIM'; r.pending = null;
     sync(r);
-    return later(r, T(delay), () => afterAction(r, 0));
+    return later(r, T(delay), () => afterAction(r, 0, true));
   }
   if (checkWin(r)) return;
   const p = cur(r);
@@ -776,8 +781,7 @@ const GLOK_EVENTS = [
     const x = r.pot; r.pot = 0;
     return { title: 'ОБНЕС ОБЩАК', text: `Дима забрал весь джекпот Общака — $${x}. «Я же смотрящий».` };
   } },
-  { w: 3, challenge: 'race' },
-  { w: 3, challenge: 'trap' },
+  { w: 6, challenge: true },
 ];
 
 function maybeGlok(r, cont) {
@@ -788,27 +792,47 @@ function maybeGlok(r, cont) {
   const pool = GLOK_EVENTS.flatMap((e) => Array(e.w).fill(e));
   for (let i = 0; i < 6; i++) {
     const ev = pool[rnd(pool.length)];
-    if (ev.challenge) return glokChallenge(r, ev.challenge, cont);
+    if (ev.challenge) return glokChallenge(r, pickGlokKind(r), cont);
     const res = ev.f(r);
     if (!res) continue;
     log(r, `Дима Глок: ${res.title.toLowerCase()} — ${res.text}`, 'glok');
     r.fx = { type: 'glok', title: res.title, text: res.text, line: GLOK_LINES[rnd(GLOK_LINES.length)], seq: ++r.fxSeq };
     r.phase = 'GLOK'; r.pending = null;
     sync(r);
-    return later(r, T(3400), cont);
+    return later(r, T(5200), cont);
   }
   cont();
 }
 
+// Задание Глока. Снаружи всегда выглядит одинаково: «кто первый нажмёт — заберёт $N».
+// Что внутри — честная халява или одна из подстав — знает только сервер.
+// Чем дальше партия, тем больше подстав и тем они злее.
+const GLOK_KINDS = {
+  real:   { from: 1,  w: (rd) => (rd < 6 ? 55 : rd < 14 ? 40 : 32) },  // честно: первый забирает
+  fine:   { from: 1,  w: (rd) => (rd < 6 ? 45 : 22) },                  // подстава: первый платит штраф
+  marked: { from: 6,  w: () => 14 },                                    // меченые купюры: деньги дали, но менты приняли
+  goon:   { from: 6,  w: () => 12 },                                    // развод: забрал братка и ещё денег
+  humble: { from: 12, w: () => 12 },                                    // Глок любит скромных: всем, кто НЕ жал, по $50
+  double: { from: 14, w: () => 10 },                                    // двойная подстава: первый платит вдвое, второй — штраф
+};
+function pickGlokKind(r) {
+  const opts = Object.entries(GLOK_KINDS).filter(([, v]) => r.round >= v.from).map(([k, v]) => [k, v.w(r.round)]);
+  let x = rnd(opts.reduce((s, [, w]) => s + w, 0));
+  for (const [k, w] of opts) { if ((x -= w) < 0) return k; }
+  return 'real';
+}
+
 function glokChallenge(r, kind, cont) {
-  const ms = 6000;
-  const task = { kind, seq: ++r.fxSeq, prize: kind === 'race' ? 150 : 100, ms, taps: [], line: GLOK_LINES[rnd(GLOK_LINES.length)] };
+  const ms = 7000;
+  const prize = [100, 150, 200][rnd(3)];
+  const task = { kind, seq: ++r.fxSeq, prize, ms, taps: [], line: GLOK_LINES[rnd(GLOK_LINES.length)] };
   r.glokTask = task;
   r.phase = 'GLOK'; r.pending = null;
-  log(r, kind === 'race' ? 'Дима Глок: кто первый нажмёт — получит $150' : 'Дима Глок раздаёт халяву. Подозрительно', 'glok');
+  log(r, `Дима Глок: кто первый нажмёт — заберёт $${prize}`, 'glok');
+  // боты не знают, что внутри, — жмут одинаково при любом раскладе
   active(r).filter((p) => p.bot).forEach((p) => {
-    if (kind === 'trap' && rnd(100) >= 35) return;
-    setTimeout(() => safe(() => glokTap(r, p, task.seq)), T(1200 + rnd(3500)));
+    if (rnd(100) >= 70) return;
+    setTimeout(() => safe(() => glokTap(r, p, task.seq)), T(1500 + rnd(4500)));
   });
   r.glokCont = cont;
   sync(r);
@@ -819,8 +843,9 @@ function glokTap(r, p, seq) {
   const t = r.glokTask;
   if (!t || t.seq !== seq || p.bankrupt || t.taps.includes(p.id)) return;
   t.taps.push(p.id);
-  if (t.kind === 'race') finishGlok(r);
-  else sync(r);
+  // у «двойной подставы» ждём второго, чтобы наказать и его; остальные закрываются по первому нажатию
+  if (t.kind !== 'double' || t.taps.length >= 2) return finishGlok(r);
+  sync(r);
 }
 
 function finishGlok(r) {
@@ -828,22 +853,43 @@ function finishGlok(r) {
   if (!t) return;
   r.glokTask = null;
   clearTimer(r);
+  const first = byId(r, t.taps[0]), second = byId(r, t.taps[1]);
+  const prize = t.prize;
   let title, text;
-  if (t.kind === 'race') {
-    const w = byId(r, t.taps[0]);
-    if (w) { w.money += t.prize; track(w); title = 'ЕСТЬ ПОБЕДИТЕЛЬ'; text = `${w.name} самый шустрый: +$${t.prize}. Остальные — тормоза.`; }
-    else { title = 'НИКТО?!'; text = 'Все проспали. Дима обиделся и забрал деньги себе.'; }
-  } else {
-    const losers = t.taps.map((id) => byId(r, id)).filter((p) => p && !p.bankrupt);
-    losers.forEach((p) => hurt(p, pay(r, p, t.prize, null)));
-    title = 'ЭТО БЫЛА ПОДСТАВА';
-    text = losers.length ? `Халявы нет! ${losers.map((p) => p.name).join(', ')} — штраф по $${t.prize}. Ха-ха.` : 'Никто не повёлся. Скучные вы, братва.';
+  if (!first) {
+    title = 'НИКТО?!';
+    text = t.kind === 'real' ? `Все проспали. Дима забрал $${prize} себе.` : 'Никто не повёлся — а там была подстава. Скучные вы, братва.';
+  } else switch (t.kind) {
+    case 'real':
+      first.money += prize; track(first);
+      title = 'ЧЕСТНО!'; text = `${first.name} самый шустрый: +$${prize}. Дима сегодня добрый.`; break;
+    case 'fine':
+      hurt(first, pay(r, first, prize, null));
+      title = 'ЭТО БЫЛА ПОДСТАВА'; text = `Халявы нет! ${first.name} платит Диме $${prize}. Ха-ха.`; break;
+    case 'marked':
+      first.money += prize; track(first);
+      sendToJail(r, first);
+      title = 'МЕЧЕНЫЕ КУПЮРЫ'; text = `${first.name} забрал $${prize}, но купюры были мечены — менты уже ждали.`; break;
+    case 'goon': {
+      const lostGoon = first.goons > 0; if (lostGoon) first.goons -= 1;
+      hurt(first, pay(r, first, Math.round(prize / 2), null));
+      title = 'РАЗВОД'; text = `${first.name} нажал и${lostGoon ? ' лишился братка, и' : ''} отдал $${Math.round(prize / 2)}. Бесплатный сыр — сам знаешь где.`; break;
+    }
+    case 'humble': {
+      const good = active(r).filter((p) => p.id !== first.id);
+      good.forEach((p) => { p.money += 50; track(p); });
+      title = 'ГЛОК ЛЮБИТ СКРОМНЫХ'; text = `${first.name} полез первым — ничего не получит. Остальным по $50 за терпение.`; break;
+    }
+    case 'double':
+      hurt(first, pay(r, first, prize * 2, null));
+      if (second) hurt(second, pay(r, second, prize, null));
+      title = 'ДВОЙНАЯ ПОДСТАВА'; text = `${first.name} платит $${prize * 2}${second ? `, ${second.name} — $${prize}` : ''}. Дима ржёт.`; break;
   }
   log(r, `Дима Глок: ${text}`, 'glok');
   r.fx = { type: 'glok', title, text, line: '', seq: ++r.fxSeq, result: true };
   sync(r);
   const cont = r.glokCont; r.glokCont = null;
-  later(r, T(2800), () => cont && cont());
+  later(r, T(4400), () => cont && cont());
 }
 
 // ---------- Сделки между игроками ----------

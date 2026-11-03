@@ -31,7 +31,7 @@
   const C = {
     N: 20, START_MONEY: 1000, SALARY: 120, GOON_PRICE: 60, MAX_GOONS: 3,
     MAX_LEVEL: 3, MAX_HEAT: 5, OMON_FINE: 150, BAIL: 60, POLICE: 15, JAIL: 5,
-    HOP_MS: 170, MAX_PLAYERS: 6,
+    HOP_MS: 240, MAX_PLAYERS: 6,
   };
 
   const COLORS = ['#ffcc33', '#ff4757', '#3d8bff', '#2ed573', '#b56bff', '#ff8c42'];

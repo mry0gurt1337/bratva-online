@@ -242,7 +242,7 @@ input:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(245, 197, 66
 .bubble {
   position: absolute; bottom: 110%; left: 50%; transform: translateX(-50%); z-index: 20;
   background: #fff; color: #111; font-size: 12px; font-weight: 800; padding: 5px 9px; border-radius: 12px; white-space: nowrap;
-  max-width: 180px; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px rgba(0,0,0,.5); animation: bub 2.6s ease forwards; pointer-events: none;
+  max-width: 180px; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 6px 18px rgba(0,0,0,.5); animation: bub 4s ease forwards; pointer-events: none;
 }
 .bubble::after { content: ''; position: absolute; top: 100%; left: 50%; margin-left: -5px; border: 5px solid transparent; border-top-color: #fff; }
 @keyframes bub { 0% { opacity: 0; transform: translate(-50%, 6px) scale(.7); } 10% { opacity: 1; transform: translate(-50%, 0) scale(1); } 85% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -8px); } }
@@ -346,10 +346,10 @@ b.neg { color: #ff7d8a !important; } b.pos { color: var(--green) !important; }
 .reels { display: flex; justify-content: center; gap: 10px; margin: 10px 0; }
 .reels span { font-size: 46px; width: 76px; height: 86px; display: grid; place-items: center; background: linear-gradient(180deg, #fff, #ddd 50%, #fff); border-radius: 14px; box-shadow: inset 0 0 0 3px #c9962e, 0 10px 24px rgba(0,0,0,.6); }
 .casino .fx-title { color: var(--gold); text-shadow: 0 4px 0 #4a2a04, 0 0 30px rgba(245,197,66,.6); }
-.flash { position: fixed; left: 50%; top: 38%; z-index: 80; transform: translate(-50%, -50%); font-family: var(--display); font-size: clamp(30px, 10vw, 54px); white-space: nowrap; pointer-events: none; animation: flashIn 1.8s ease forwards; }
+.flash { position: fixed; left: 50%; top: 38%; z-index: 80; transform: translate(-50%, -50%); font-family: var(--display); font-size: clamp(30px, 10vw, 54px); white-space: nowrap; pointer-events: none; animation: flashIn 2.8s ease forwards; }
 .flash.omon { color: #fff; text-shadow: 0 0 20px #ff4757, 0 0 40px #3d8bff; }
 .flash.dead { color: var(--red); font-size: clamp(22px, 7vw, 36px); text-shadow: 0 0 20px rgba(255,71,87,.7); }
-@keyframes flashIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 75% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes flashIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2); } 10% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 82% { opacity: 1; } 100% { opacity: 0; } }
 
 #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 12px); transform: translate(-50%, -150%); z-index: 100; background: #fff; color: #111; font-weight: 800; font-size: 14px; padding: 10px 16px; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.5); transition: transform .3s cubic-bezier(.2,.9,.3,1.2); max-width: 90vw; text-align: center; }
 #toast.show { transform: translate(-50%, 0); }
@@ -1099,3 +1099,106 @@ img.gift-fly-ic { width: 64px; height: 64px; filter: drop-shadow(0 0 14px rgba(2
 /* 3D-здания в окнах решений, сделках и карточках точек */
 img.cell-art { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 6px 10px rgba(0,0,0,.6)); }
 .sh-em:has(img.cell-art), .of-em:has(img.cell-art) { background: radial-gradient(circle at 50% 60%, color-mix(in srgb, var(--g, #c99a2e) 22%, #120f18), #0e0c13 75%); padding: 3px; }
+
+/* ===================== Раскладка игры для всех экранов ===================== */
+/* Принцип: поле максимально большое, но лента событий и чат ВСЕГДА видны.
+   Портрет (телефоны, развёрнутый Fold, планшет вертикально): поле сверху, игроки в одну строку, лента, чат.
+   Альбом / широкий экран (ПК, планшет горизонтально): поле слева, справа колонка игроки + лента + чат. */
+.screen.game { --reserve: 330px; gap: 8px; }
+.layout { gap: 8px; }
+.board-wrap { width: min(100%, calc(100dvh - var(--reserve))); min-width: min(100%, 280px); margin: 0 auto; }
+.side { gap: 8px; min-height: 0; }
+.players { display: grid; grid-template-columns: repeat(var(--n, 4), minmax(0, 1fr)); gap: 6px; }
+.feed { min-height: 150px; }
+.log { font-size: 13px; line-height: 1.45; }
+.log .e { padding: 2px 0; }
+.chat { padding: 7px; }
+#chatf { display: flex; gap: 6px; align-items: center; }
+#chatin { flex: 1; min-width: 0; height: 40px; font-size: 15px; }
+.pc .nm { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-top { min-width: 0; flex: 1; }
+/* 5–6 игроков на узком телефоне — компактнее, но в одну строку */
+@media (max-width: 460px) {
+  .players[data-n="5"] .pc .stats, .players[data-n="6"] .pc .stats { display: none; }
+  .players[data-n="5"] .pc .money, .players[data-n="6"] .pc .money { font-size: 13px; }
+  .players[data-n="5"] .pc .pc-pic, .players[data-n="6"] .pc .pc-pic { display: none; }
+}
+/* Низкий экран: прячем быстрые фразы, оставляем поле ввода */
+@media (max-height: 700px) { .screen.game { --reserve: 300px; } .feed { min-height: 120px; } .quick { display: none; } }
+
+/* Большой портретный экран: развёрнутый Fold, планшет вертикально */
+@media (min-width: 600px) and (max-aspect-ratio: 1/1) {
+  .screen.game { --reserve: 380px; padding-left: 14px; padding-right: 14px; }
+  .board-wrap { width: min(100%, calc(100dvh - var(--reserve)), 900px); }
+  .feed { min-height: 200px; }
+  .log { font-size: 15px; }
+  .pc { padding: 8px 10px; }
+  .pc .pc-pic { width: 34px; height: 34px; }
+  .pc .nm { font-size: 14px; }
+  .pc .money { font-size: 19px; }
+  .pc .stats { font-size: 12px; }
+  .quick button { font-size: 14px; padding: 7px 12px; }
+}
+
+/* Альбом и широкие экраны: две колонки */
+@media (min-aspect-ratio: 1/1) and (min-width: 640px) {
+  .layout { flex-direction: row; align-items: stretch; }
+  .board-wrap { width: min(calc(100dvh - 64px), calc(100% - 330px)); margin: 0; align-self: center; }
+  .side { flex: 1; min-width: 300px; max-width: 460px; }
+  .players { grid-template-columns: 1fr; gap: 6px; flex: none; max-height: 48%; overflow-y: auto; }
+  .pc { flex-direction: row; align-items: center; padding: 7px 10px; }
+  .pc .pc-pic { width: 38px; height: 38px; }
+  .pc .nm { font-size: 14px; }
+  .pc .money { font-size: 18px; }
+  .feed { flex: 1; min-height: 180px; }
+  .log { font-size: 14px; }
+}
+
+/* Длинные надписи-вспышки не вылезают за экран */
+.flash { white-space: normal; max-width: 92vw; text-align: center; line-height: 1.05; }
+/* Имена везде обрезаются многоточием */
+.seat-name, .t-name, .tr-p, .who b, .prof-name, .pp-txt b, .lb-me-txt .cap-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.win-name { max-width: 92vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (min-width: 600px) and (max-aspect-ratio: 1/1) {
+  .screen.game { --reserve: 340px; }
+  .pc-body { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+  .pc .stats { flex-direction: column; gap: 0; align-items: flex-end; font-size: 11px; line-height: 1.2; }
+  .pc .stats span { display: inline-flex; align-items: center; gap: 2px; }
+}
+/* поле подгоняется скриптом; карточки игроков на больших экранах — в две строки */
+.board-wrap { min-width: 0; }
+.layout { overflow: hidden; }
+.side { min-height: 0; }
+.feed { min-height: 0; flex: 1; }
+@media (min-width: 600px) and (max-aspect-ratio: 1/1) {
+  .pc .stats { flex-direction: row; gap: 6px; align-items: center; }
+  .pc-body { flex-wrap: wrap; row-gap: 0; }
+}
+
+/* ===================== Обучение и подсказки ===================== */
+.tip { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 50px); z-index: 75; width: min(94vw, 520px);
+  transform: translate(-50%, -14px); opacity: 0; transition: opacity .25s, transform .25s; pointer-events: auto;
+  display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 14px; border-radius: 16px;
+  background: linear-gradient(180deg, #221d12, #15120c); border: 1px solid #6b5216; box-shadow: 0 18px 40px -12px rgba(0,0,0,.8), 0 0 0 1px rgba(245,197,66,.08) inset; }
+.tip.show { opacity: 1; transform: translate(-50%, 0); }
+.tip-ic { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: rgba(234,179,8,.14); color: #eab308; }
+.tip-ic .ic { width: 22px; height: 22px; }
+.tip-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tip-t b { font-size: 14px; font-weight: 800; color: #fde68a; }
+.tip-t span { font-size: 13px; line-height: 1.4; color: #e4e4e7; }
+.tip-x { flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(255,255,255,.06); color: #a1a1aa; }
+.tip-x .ic { width: 16px; height: 16px; }
+@media (min-width: 600px) { .tip-t b { font-size: 16px; } .tip-t span { font-size: 15px; } }
+
+.tut { z-index: 90; background: rgba(5,4,8,.78); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); display: grid; place-items: center; padding: 16px; }
+.tut-card { width: min(100%, 400px); text-align: center; padding: 22px 20px 18px; border-radius: 22px; background: linear-gradient(180deg, #1c1924, #121017); border: 1px solid #3a3020; box-shadow: 0 30px 60px -20px #000; }
+.tut-step { font-size: 12px; font-weight: 700; letter-spacing: .12em; color: #a1a1aa; }
+.tut-ic { width: 72px; height: 72px; margin: 14px auto 10px; border-radius: 22px; display: grid; place-items: center; color: #eab308;
+  background: radial-gradient(circle at 50% 35%, rgba(234,179,8,.25), rgba(234,179,8,.05)); border: 1px solid rgba(234,179,8,.3); }
+.tut-ic .ic { width: 36px; height: 36px; }
+.tut-card h3 { font-family: var(--display); font-weight: 400; font-size: 24px; color: #ffe7a8; margin: 0 0 8px; }
+.tut-card p { font-size: 15px; line-height: 1.5; color: #d4d4d8; margin: 0 0 14px; min-height: 66px; }
+.tut-dots { display: flex; justify-content: center; gap: 6px; margin-bottom: 16px; }
+.tut-dots i { width: 7px; height: 7px; border-radius: 50%; background: #3f3f46; }
+.tut-dots i.on { width: 20px; border-radius: 4px; background: #eab308; }
+.tut-btns { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; }
