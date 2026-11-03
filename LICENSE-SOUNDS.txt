@@ -24,3 +24,4 @@
 
 	Follow on Twitter for updates:
 	http://twitter.com/KenneyNL
+sfx-boom.mp3, sfx-shots.mp3, sfx-siren.mp3, sfx-snitch.mp3 — синтезированы специально для «Братвы» (собственная работа, без сторонних записей).

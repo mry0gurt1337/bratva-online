@@ -82,8 +82,29 @@
     { id: 'chain', name: 'Золотая цепь', price: 60 },
     { id: 'merin', name: 'Мерин', price: 150 },
   ];
+  // Козыри — активные приёмы против соперников. Играются в свой ход до броска.
+  const ACTIONS = {
+    boom:  { name: 'Подрыв', cost: 120, target: 'cell', text: 'Взорвать чужую точку: минус звезда, а без звёзд — точка уходит банку. Розыск +2.' },
+    shoot: { name: 'Перестрелка', cost: 0, target: 'player', text: 'Кубик + сила против соперника. Проигравший отдаёт $120 и братка.' },
+    snitch:{ name: 'Стук', cost: 80, target: 'player', text: 'Стукануть ментам — соперник едет в тюрьму (если не прикроет браток).' },
+    roof:  { name: 'Крыша', cost: 0, target: null, text: 'Прикрывает от следующего козыря против тебя.' },
+  };
+  const MAX_HAND = 3;
   const BOOST = { price: 40, pct: 20 };   // «Подъёмные»: +20% к стартовым деньгам на одну партию
-  const EARN = { daily: 25, game: 5, win: 20, dayCap: 120 };
+  // Призы за катку: платит игра (не другие игроки). Партия только с ботами — половина. Лимит в день.
+  const EARN = { daily: 25, ladder: [25, 30, 40, 50, 60, 80, 150], game: 5, place: [40, 20, 10], chase: 8, dayCap: 200 };
+  // Колесо фортуны: 1 бесплатный прокрут в день (+1 за 7-й день серии). Шансы открыты игроку.
+  // Персонаж, рамка и т.п. — случайный из ещё не купленных; если всё уже есть — монеты.
+  const WHEEL = [
+    { id: 'c30', kind: 'coins', amount: 30, w: 30, label: '30 монет' },
+    { id: 'c60', kind: 'coins', amount: 60, w: 22, label: '60 монет' },
+    { id: 'c150', kind: 'coins', amount: 150, w: 8, label: '150 монет' },
+    { id: 'char', kind: 'char', w: 6, label: 'Персонаж' },
+    { id: 'frame', kind: 'frame', w: 9, label: 'Рамка' },
+    { id: 'dice', kind: 'dice', w: 10, label: 'Кубики' },
+    { id: 'title', kind: 'title', w: 9, label: 'Титул' },
+    { id: 'theme', kind: 'theme', w: 6, label: 'Тема' },
+  ];
 
   // 6x6 кольцо: 0 — левый верхний угол, дальше по часовой
   function cellXY(id) {
@@ -103,7 +124,7 @@
   }
   const cellValue = (id, level) => BOARD[id].price + BOARD[id].up * level;
 
-  const api = { BOARD, GROUPS, C, COLORS, PACKS, SHOP, GIFTS, BOOST, EARN, cellXY, groupOf, ownsGroup, rentOf, cellValue };
+  const api = { BOARD, GROUPS, C, COLORS, PACKS, SHOP, GIFTS, BOOST, EARN, WHEEL, ACTIONS, MAX_HAND, cellXY, groupOf, ownsGroup, rentOf, cellValue };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.G = api;
 })(typeof self !== 'undefined' ? self : this);

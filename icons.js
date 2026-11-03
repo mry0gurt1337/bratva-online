@@ -92,7 +92,7 @@
     if (!d) return '';
     return S(d).replace('class="ic"', `class="ic ic-${name}${cls ? ' ' + cls : ''}"`);
   }
-  const api = { ic, has: (n) => !!P[n], DEFS };
+  const api = { ic, has: (n) => !!P[n], path: (n) => P[n] || '', DEFS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else {
     root.IC = api;

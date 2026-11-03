@@ -150,7 +150,7 @@ socket.on('state', (s) => {
 });
 socket.on('err', (m) => { toast(m); SFX.play('bad'); });
 socket.on('spent', ({ amount }) => { if (wallet) { wallet.coins -= amount; refreshCoins(); } });
-socket.on('earned', ({ amount, win }) => { if (wallet) { wallet.coins += amount; refreshCoins(); } setTimeout(() => toast(`+${amount} монет ${win ? 'за победу' : 'за партию'}`), 2500); });
+socket.on('earned', ({ amount, win, place, chase }) => { if (wallet) { wallet.coins += amount; refreshCoins(); } setTimeout(() => toast(`+${amount} монет ${chase ? 'за уход от погони' : win ? 'за победу' : place ? `за ${place} место` : 'за партию'}`), chase ? 600 : 2500); });
 socket.on('gift', (g) => giftFx(g));
 const ident = () => ({ session, device });
 loadWallet().then(() => { if (screen === 'home') renderHome(); });
@@ -227,7 +227,8 @@ function embers() { return Array.from({ length: 16 }, () => `<i style="left:${Ma
 const myName = () => (profile.name || '').trim() || (me && me.name) || '';
 const myAva = () => (me && me.photo ? `<img src="${esc(me.photo)}" alt="" referrerpolicy="no-referrer">` : pic(profile.char));
 const myFrame = () => (wallet && wallet.equip && wallet.equip.frame ? ' ' + wallet.equip.frame : '');
-const dailyReady = () => !!(wallet && wallet.daily_on !== todayStr());
+const spinReady = () => !!(wallet && (wallet.spin_on !== todayStr() || wallet.bonus_spins > 0));
+const dailyReady = () => !!(wallet && (wallet.daily_on !== todayStr() || spinReady()));
 
 function renderHome() {
   screen = 'home';
@@ -280,7 +281,7 @@ function renderHome() {
   $('#chars').onclick = () => renderChars();
   $('#prof').onclick = () => profileSheet();
   $('#play').onclick = () => playSheet();
-  $('#daily').onclick = async () => { if (dailyReady()) { await claimDaily(); renderHome(); } else toast('Бонус уже забран — приходи завтра'); };
+  $('#daily').onclick = () => showBonus();
   $('#rules').onclick = showRules;
   $('#top').onclick = () => renderTop();
   if (urlRoomState.code && !renderHome.invited) { renderHome.invited = true; setTimeout(() => playSheet('code'), 300); }
@@ -482,7 +483,7 @@ function renderLobby() {
       </div>` : ''}
       ${mine && set.boosts ? `<button class="boost-toggle ${mine.boost ? 'on' : ''}" id="boostT"><span class="bt-ic">${ic('briefcase')}</span><span><b>Подъёмные +${BOOST.pct}%</b><small>Старт $${Math.round(C.START_MONEY * (1 + BOOST.pct / 100))} · ${BOOST.price} монет при старте · у тебя ${wallet ? wallet.coins : '…'}</small></span><i></i></button>` : ''}
       <button class="lb-rules" id="tableSet" ${host ? '' : 'disabled'}>
-        <span class="lr-chip">${ic('flag')}${set.rounds || 20} кругов</span>
+        <span class="lr-chip">${ic('flag')}${set.rounds || 20} кругов</span><span class="lr-chip gold">${ic('coin')}Призы ${EARN.game + EARN.place[0]} / ${EARN.game + EARN.place[1]} / ${EARN.game + EARN.place[2]}</span>
         <span class="lr-chip ${set.glok ? 'on' : ''}">${ic('bolt')}Глок ${set.glok ? 'в деле' : 'выкл'}</span>
         <span class="lr-chip ${set.boosts ? 'on' : ''}">${ic('briefcase')}Бусты ${set.boosts ? 'да' : 'нет'}</span>
         ${host ? `<span class="lr-edit">${ic('menu')}</span>` : ''}
@@ -589,7 +590,7 @@ function buildGame() {
           <div class="center-top"><div class="heat" id="heat"></div><div class="pot-badge" id="pot"></div></div>
           <div class="dice" id="dice"><div class="die" id="d1"></div><div class="die" id="d2"></div></div>
           <div class="status" id="status"></div>
-          <button class="btn gold roll" id="roll">Бросить кости</button>
+          <div class="roll-row"><button class="btn hand-btn" id="handB" hidden></button><button class="btn gold roll" id="roll">Бросить кости</button></div>
           <div class="timer" id="timer"><i id="timerbar"></i></div>
         </div>
         <div class="tokens" id="tokens"></div>
@@ -695,7 +696,7 @@ function updateGame() {
         <div class="pc-top"><span class="nm">${esc(p.name)}</span>${p.jail ? `<span class="pc-flag" title="В тюрьме">${ic('lock')}</span>` : ''}${!p.connected ? `<span class="pc-flag off" title="Нет связи">${ic('offline')}</span>` : ''}</div></div>
       <div class="pc-body">${ttl(p.title)}
         <div class="money">${p.bankrupt ? 'РАЗОРЁН' : '$' + p.money}${delta ? `<span class="delta ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : '−'}${Math.abs(delta)}</span>` : ''}</div>
-        <div class="stats"><span title="Авторитет">${ic('crown')}${p.auth}</span><span title="Братки">${ic('fist')}${p.goons}</span><span title="Точки">${ic('house')}${counts[p.id] || 0}</span></div>
+        <div class="stats"><span title="Авторитет">${ic('crown')}${p.auth}</span><span title="Братки">${ic('fist')}${p.goons}</span><span title="Точки">${ic('house')}${counts[p.id] || 0}</span><span title="Козыри" class="st-cards${p.shield ? ' shielded' : ''}">${ic(p.shield ? 'shield' : 'bolt')}${p.hand.length}</span></div>
       </div>
     </div>`;
   }).join('');
@@ -712,8 +713,17 @@ function updateGame() {
   else if (st.phase === 'DECIDE') status = mine ? '<b>Решай!</b>' : `<b style="color:${cp.color}">${name}</b> ${pendingText(st.pending)}`;
   else if (st.phase === 'ANIM') status = '…';
   else if (st.phase === 'GLOK') status = '<b>Глок</b> решает вопросики…';
+  else if (st.phase === 'CHASE' && st.chase) { const c = byId(st.chase.pid); status = `<b style="color:${c ? c.color : '#fff'}">${c ? esc(c.name) : ''}</b> уходит от погони…`; }
   $('#status').innerHTML = status;
   roll.hidden = !(mine && st.phase === 'ROLL');
+  const hb = $('#handB'), myP = meP();
+  const canAct = mine && st.phase === 'ROLL' && myP && myP.hand.length && !myP.usedAct;
+  hb.hidden = !canAct;
+  if (canAct) { hb.innerHTML = `${ic('bolt')}Козыри <b>${myP.hand.length}</b>`; hb.onclick = showHand; }
+  if (canAct) tip('cards');
+  // ОМОН выехал — сирена и мигалки
+  if (st.omon != null && updateGame.omon == null) { SFX.play('siren'); sirenLights(3200); }
+  updateGame.omon = st.omon;
   roll.disabled = false;
   const meNow = meP();
   $('#trade').hidden = !meNow || meNow.bankrupt;
@@ -727,6 +737,7 @@ function updateGame() {
   updateGlokTask();
   updateCrowd();
   updateEventBadge();
+  updateChase();
   updateOffers();
 
   if (mine && st.phase === 'DECIDE' && st.pending) openSheet(st.pending);
@@ -756,6 +767,7 @@ const TIPS = {
   glok: ['bolt', 'Раздача Глока', 'Кто первый нажмёт — заберёт деньги. Но это может быть подстава. Рискнёшь?'],
   card: ['chat', 'Звонок с зоны', 'Случайное событие: деньги, переезд или неприятности.'],
   offer: ['deal', 'Тебе предлагают сделку', 'Посмотри цену и жми «Да» или «Нет», пока не вышло время.'],
+  cards: ['bolt', 'Козыри', 'Перед броском можно разыграть козырь: подорвать чужую точку, устроить перестрелку, стукануть ментам или поставить крышу. Новый козырь — за каждый проход Общака.'],
   trade: ['deal', 'Сделки', 'Кнопка с рукопожатием наверху — продай свою точку или выкупи чужую.'],
 };
 const tipsSeen = new Set(LS.get('bratva_tips', []));
@@ -824,6 +836,104 @@ function glokCard(inner) {
     <div class="glok-name">ГЛОК</div>
     <div class="glok-role">смотрящий за районом</div>${inner}</div></div>`;
 }
+// ---------- Погоня ----------
+let chaseSeq = 0, chaseGame = null, chaseWatch = null;
+function updateChase() {
+  const c = st.chase;
+  if (!c) {
+    if (chaseWatch) { chaseWatch.remove(); chaseWatch = null; }
+    return;
+  }
+  if (c.seq === chaseSeq) return;
+  chaseSeq = c.seq;
+  closeSheet();
+  if (c.pid === myId && window.Chase) {
+    chaseGame = Chase.start({ title: c.kind === 'snitch' ? 'НА ТЕБЯ СТУКНУЛИ' : 'ПОГОНЯ', onEnd: (ok) => { chaseGame = null; socket.emit('chaseEnd', { seq: c.seq, ok }); } });
+  } else {
+    const p = byId(c.pid);
+    SFX.play('siren'); sirenLights(3000);
+    chaseWatch = document.createElement('div');
+    chaseWatch.className = 'chase-watch';
+    chaseWatch.innerHTML = `<span class="cw-ic">${ic('siren')}</span><span><b>${p ? esc(p.name) : ''}</b> уходит от ментов<small>погоня до 30 секунд</small></span>`;
+    document.body.appendChild(chaseWatch);
+  }
+}
+
+// ---------- Козыри ----------
+const ACT_IC = { boom: 'flame', shoot: 'sword', snitch: 'siren', roof: 'shield' };
+function showHand() {
+  const mp = meP();
+  if (!mp) return;
+  const m = modal(`<div class="rules hand"><h2>Козыри</h2><p class="hint">Один козырь за ход, до броска. Новый — за каждый проход Общака (максимум ${G.MAX_HAND}).</p>
+    <div class="hand-list">${mp.hand.map((k, i) => { const A = G.ACTIONS[k]; return `<button class="act-card a-${k}" data-i="${i}" ${mp.money < A.cost ? 'disabled' : ''}>
+      <span class="ac-ic">${ic(ACT_IC[k])}</span><span class="ac-t"><b>${A.name}</b><small>${A.text}</small></span><span class="ac-cost">${A.cost ? '$' + A.cost : 'бесплатно'}</span></button>`; }).join('')}</div></div>`);
+  $$('.act-card', m).forEach((b) => b.onclick = () => {
+    const k = mp.hand[Number(b.dataset.i)], A = G.ACTIONS[k];
+    if (!A.target) { m.closeModal(); return socket.emit('act', { card: k }); }
+    const box = $('.hand', m);
+    if (A.target === 'player') {
+      const list = st.players.filter((p) => p.id !== myId && !p.bankrupt);
+      box.innerHTML = `<h2>${A.name}: на кого?</h2><div class="pick-list">${list.map((p) => `<button class="pick" data-t="${p.id}" style="--c:${p.color}"><span class="pl-pic">${avatar(p)}</span><span><b>${esc(p.name)}</b><small>$${p.money} · сила ${Math.min(3, p.auth) + p.goons}${p.shield ? ' · под крышей' : ''}</small></span></button>`).join('')}</div>`;
+      $$('.pick', box).forEach((x) => x.onclick = () => { m.closeModal(); socket.emit('act', { card: k, target: x.dataset.t }); });
+    } else {
+      const cells = Object.entries(st.props).filter(([, v]) => v.owner !== myId).map(([id, v]) => ({ id: Number(id), v, o: byId(v.owner) })).filter((x) => x.o && !x.o.bankrupt);
+      box.innerHTML = `<h2>${A.name}: что взорвать?</h2>${cells.length ? `<div class="pick-list">${cells.map((x) => `<button class="pick" data-c="${x.id}" style="--c:${x.o.color}"><span class="pick-cell">${cellIc(BOARD[x.id])}</span><span><b>${BOARD[x.id].name}</b><small>${esc(x.o.name)} · звёзд ${x.v.level}${x.v.level ? ' — слетит одна' : ' — точка уйдёт банку'}</small></span></button>`).join('')}</div>` : '<p class="hint">У соперников пока нет точек.</p>'}`;
+      $$('.pick', box).forEach((x) => x.onclick = () => { m.closeModal(); socket.emit('act', { card: k, cell: Number(x.dataset.c) }); });
+    }
+  });
+}
+function shake(cls = 'shake') { document.body.classList.remove(cls); void document.body.offsetWidth; document.body.classList.add(cls); setTimeout(() => document.body.classList.remove(cls), 900); }
+function sirenLights(ms) {
+  const el = document.createElement('div'); el.className = 'siren-lights';
+  document.body.appendChild(el); setTimeout(() => el.remove(), ms);
+}
+function explodeAt(el) {
+  const r = el ? el.getBoundingClientRect() : { left: innerWidth / 2 - 30, top: innerHeight / 2 - 30, width: 60, height: 60 };
+  const b = document.createElement('div'); b.className = 'boom';
+  b.style.left = r.left + r.width / 2 + 'px'; b.style.top = r.top + r.height / 2 + 'px';
+  b.innerHTML = '<i class="b-flash"></i><i class="b-ring"></i><i class="b-fire"></i><i class="b-smoke"></i>' +
+    Array.from({ length: 16 }, (_, k) => `<i class="b-deb" style="--a:${k * 22.5 + Math.random() * 12}deg;--d:${60 + Math.random() * 90}px;--s:${4 + Math.random() * 6}px"></i>`).join('');
+  document.body.appendChild(b); setTimeout(() => b.remove(), 2200);
+  if (el) { el.classList.add('scorched'); setTimeout(() => el.classList.remove('scorched'), 4000); }
+}
+function showAct(fx) {
+  const a = byId(fx.a), t = byId(fx.t), A = G.ACTIONS[fx.kind];
+  if (!a) return;
+  if (fx.blocked) {
+    SFX.play('fight');
+    overlay(`<div class="fx act-fx"><div class="ev-kicker">${esc(a.name)} · ${A.name}</div><div class="act-big">${ic('shield')}</div><div class="fx-title">НЕ ПРОШЛО</div><div class="ev-text">${t ? esc(t.name) + ': ' : ''}${esc(fx.blocked)}</div></div>`, 2000);
+    return;
+  }
+  if (fx.kind === 'roof') {
+    SFX.play('buy');
+    flash(`${a.name}: под крышей`, 'deal');
+    const card = $(`.pc[data-pid="${a.id}"]`); if (card) { card.classList.add('shield-glow'); setTimeout(() => card.classList.remove('shield-glow'), 2500); }
+    return;
+  }
+  if (fx.kind === 'boom') {
+    SFX.play('boom'); SFX.vibe([200, 60, 300]);
+    setTimeout(() => { explodeAt($(`#cell${fx.cell}`)); shake('shake-big'); }, 120);
+    setTimeout(() => flash(fx.res === 'gone' ? `«${BOARD[fx.cell].name}» взлетела на воздух` : `Подрыв: «${BOARD[fx.cell].name}» −1 звезда`, 'dead'), 700);
+    return;
+  }
+  if (fx.kind === 'snitch') {
+    SFX.play('siren'); sirenLights(2800);
+    overlay(`<div class="fx act-fx snitch-fx"><div class="ev-kicker">${esc(a.name)} стуканул</div><div class="act-big">${ic('siren')}</div><div class="fx-title">МЕНТЫ ЕДУТ</div><div class="ev-text">${t ? `<b>${esc(t.name)}</b> ${fx.res === 'chase' ? 'пытается уйти от погони…' : fx.res === 'jail' ? 'уезжает в тюрьму.' : 'отмазался — браток взял вину на себя.'}` : ''}</div></div>`, 2200);
+    return;
+  }
+  if (fx.kind === 'shoot' && t) {
+    SFX.play('shots'); SFX.vibe([40, 60, 40, 60, 40, 200, 40, 60, 40]);
+    const ov = overlay(`<div class="fx shoot-fx">
+      <div class="ev-kicker">Перестрелка</div>
+      <div class="duel"><div class="gun l" style="--c:${a.color}"><div class="fx-av">${avatar(a)}</div><b>${esc(a.name)}</b><span class="d-pw">${fx.aP}</span><small>кубик ${fx.aR} + сила ${fx.aP - fx.aR}</small><i class="muzzle"></i></div>
+        <div class="tracers">${Array.from({ length: 7 }, (_, k) => `<i style="--k:${k};--y:${Math.round(Math.random() * 60 - 30)}px" class="${k % 2 ? 'rl' : 'lr'}"></i>`).join('')}</div>
+        <div class="gun r" style="--c:${t.color}"><div class="fx-av">${avatar(t)}</div><b>${esc(t.name)}</b><span class="d-pw">${fx.tP}</span><small>кубик ${fx.tR} + сила ${fx.tP - fx.tR}</small><i class="muzzle"></i></div></div>
+      <div class="fx-res ${fx.win ? 'good' : 'badr'}">${fx.win ? esc(a.name) : esc(t.name)} победил · +$120</div></div>`, 3400);
+    shake('shake');
+    setTimeout(() => { ov.classList.add('done'); shake('shake'); }, 1700);
+  }
+}
+
 // ---------- Наезд толпой ----------
 let crowdEl = null, crowdSeq = 0;
 function updateCrowd() {
@@ -972,7 +1082,7 @@ const cardHTML = (c) => `<div class="pcard ${c.s === 'h' || c.s === 'd' ? 'red' 
 const casinoUI = { game: 'slots', bet: null, pick: 'red' };
 const GAMES = {
   slots: { t: 'Автомат', i: 'slots', d: 'Три одинаковых: вишни ×3, лимоны ×4, колокола ×6, бриллианты ×10, семёрки ×25. Пара — ставка назад и +20%.' },
-  roulette: { t: 'Рулетка', i: 'roulette', d: 'Красное или чёрное — ×2. Зеро — ×36.' },
+  roulette: { t: 'Рулетка', i: 'roulette', d: 'Цвет и чёт/нечет — ×2, дюжина — ×3, зеро — ×36. Выпало зеро — ставка на цвет или чётность возвращается наполовину.' },
   ochko: { t: 'Очко', i: 'cards', d: 'Против крупье до 21. Выигрыш ×2, очко с раздачи и два туза ×2.5.' },
 };
 function openCasino(q) {
@@ -984,10 +1094,17 @@ function openCasino(q) {
       <div class="cs-head"><div class="cs-title">КАЗИНО</div><div class="cs-sub">«Три топора» · у тебя $${mp.money}${shuler ? ' · <b>Шулер: выигрыш +50%</b>' : ''}</div></div>
       <div class="cs-games">${Object.entries(GAMES).map(([k, g]) => `<button data-game="${k}" class="${k === casinoUI.game ? 'on' : ''}">${ic(g.i)}${g.t}</button>`).join('')}</div>
       <div class="cs-desc">${GAMES[casinoUI.game].d}</div>
-      ${casinoUI.game === 'roulette' ? `<div class="cs-picks">
-        <button data-pick="red" class="rp red ${casinoUI.pick === 'red' ? 'on' : ''}">Красное ×2</button>
-        <button data-pick="black" class="rp black ${casinoUI.pick === 'black' ? 'on' : ''}">Чёрное ×2</button>
-        <button data-pick="zero" class="rp zero ${casinoUI.pick === 'zero' ? 'on' : ''}">Зеро ×36</button></div>` : ''}
+      ${casinoUI.game === 'roulette' ? `<div class="roul-table">
+        <button data-pick="zero" class="rp zero ${casinoUI.pick === 'zero' ? 'on' : ''}">0<small>×36</small></button>
+        <div class="rt-main">
+          <div class="rt-row">${[['d1', '1–12'], ['d2', '13–24'], ['d3', '25–36']].map(([k, l]) => `<button data-pick="${k}" class="rp dz ${casinoUI.pick === k ? 'on' : ''}">${l}<small>×3</small></button>`).join('')}</div>
+          <div class="rt-row">
+            <button data-pick="even" class="rp eo ${casinoUI.pick === 'even' ? 'on' : ''}">Чёт<small>×2</small></button>
+            <button data-pick="red" class="rp red ${casinoUI.pick === 'red' ? 'on' : ''}">${ic('star')}<small>×2</small></button>
+            <button data-pick="black" class="rp black ${casinoUI.pick === 'black' ? 'on' : ''}">${ic('star')}<small>×2</small></button>
+            <button data-pick="odd" class="rp eo ${casinoUI.pick === 'odd' ? 'on' : ''}">Нечет<small>×2</small></button>
+          </div></div></div>
+        ${(casinoUI.hist || []).length ? `<div class="roul-hist">${casinoUI.hist.map((n) => `<i class="${n === 0 ? 'z' : RED_N.has(n) ? 'r' : 'b'}">${n}</i>`).join('')}</div>` : ''}` : ''}
       <div class="cs-chips">${q.bets.map((b) => `<button data-bet="${b}" class="chip c${b} ${b === casinoUI.bet ? 'on' : ''}"><span>$${b}</span></button>`).join('')}</div>
       <div class="sh-btns"><button class="btn gold big" id="csgo">Играть на $${casinoUI.bet}</button><button class="btn" id="csno">Не играю</button></div>
       <div class="sh-timer"><i id="shbar"></i></div>
@@ -1048,15 +1165,21 @@ function casinoFx(fx) {
       SFX.play(fx.won ? 'casino-win' : 'lose');
     }, 1500 + 2 * 450 + 150);
   } else if (fx.type === 'roulette') {
-    const name = { red: 'красное', black: 'чёрное', zero: 'зеро' };
-    const ov = overlay(`<div class="fx casino roul-fx"><div class="fx-title">РУЛЕТКА</div><div class="fx-sub">${who} ставит $${fx.bet} на ${name[fx.color]}</div>
-      <div class="wheel"><div class="wheel-rot">${wheelSVG()}</div><i class="wheel-ptr"></i></div>
-      <div class="roul-n ${fx.res}">${fx.n}</div>${res(fx.won, `−$${fx.bet}`)}</div>`, 4100);
-    const rot = $('.wheel-rot', ov), idx = WHEEL.indexOf(fx.n);
+    const name = { red: 'красное', black: 'чёрное', zero: 'зеро', even: 'чёт', odd: 'нечет', d1: '1–12', d2: '13–24', d3: '25–36' };
+    casinoUI.hist = [fx.n, ...(casinoUI.hist || [])].slice(0, 8);
+    const ov = overlay(`<div class="fx casino roul-fx"><div class="fx-title">РУЛЕТКА</div><div class="fx-sub">${who} ставит $${fx.bet} на ${name[fx.color] || fx.color}</div>
+      <div class="wheel"><div class="wheel-rot">${wheelSVG()}</div><div class="ball-rot"><i class="ball"></i></div><i class="wheel-ptr"></i><i class="wheel-glare"></i></div>
+      <div class="roul-n ${fx.res}">${fx.n}</div>${res(fx.won, fx.n === 0 && ['red', 'black', 'even', 'odd'].includes(fx.color) ? `зеро: −$${Math.round(fx.bet / 2)}` : `−$${fx.bet}`)}</div>`, 5200);
+    const rot = $('.wheel-rot', ov), ball = $('.ball-rot', ov), idx = WHEEL.indexOf(fx.n);
     SFX.play('dice', 0.5);
-    requestAnimationFrame(() => requestAnimationFrame(() => { rot.style.transform = `rotate(${-(360 * 5 + idx * (360 / 37))}deg)`; }));
-    let t = 0; const tk = setInterval(() => { SFX.play('tick', 0.35); if (++t > 14) clearInterval(tk); }, 120 + t * 10);
-    setTimeout(() => { ov.classList.add('done'); SFX.play(fx.won ? 'casino-win' : 'lose'); }, 3000);
+    // колесо крутится в одну сторону, шарик — навстречу и падает в ячейку под стрелкой
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      rot.style.transform = `rotate(${-(360 * 4 + idx * (360 / 37))}deg)`;
+      ball.style.transform = `rotate(${360 * 6}deg)`;
+      ball.classList.add('drop');
+    }));
+    let t = 0; const tk = () => { SFX.play('tick', 0.3 + t * 0.03); if (++t < 18) setTimeout(tk, 90 + t * t * 1.4); }; tk();
+    setTimeout(() => { ov.classList.add('done'); if (fx.won) coinBurst(ov, 16); SFX.play(fx.won ? 'casino-win' : 'lose'); }, 3600);
   } else if (fx.type === 'ochko') {
     const txt = { golden: 'ЗОЛОТОЕ ОЧКО!', natural: 'ОЧКО С РАЗДАЧИ!', win: 'ВЫИГРАЛ', bust: 'ПЕРЕБОР', lose: 'КРУПЬЕ ВЗЯЛ', push: 'НИЧЬЯ' }[fx.result];
     const ov = overlay(`<div class="fx casino ochko-fx"><div class="fx-title">ОЧКО</div><div class="fx-sub">${who} · ставка $${fx.bet}</div>
@@ -1156,7 +1279,7 @@ function drawTokens(hopPid) {
 
 // ---------- Лента ----------
 const SOUND_BY_KIND = { buy: 'buy', rent: 'cash', salary: 'cash', loss: 'bad', sell: 'bad', jail: 'jail', police: 'jail', bankrupt: 'bankrupt', goon: 'click', chat: 'chat', join: 'turn', 'trade-ok': 'buy' };
-const LOG_IC = { dice: 'dice', buy: 'house', rent: 'coin', salary: 'coin', loss: 'coin', sell: 'coin', win: 'trophy', strelka: 'sword', omon: 'siren', police: 'siren', jail: 'lock', bankrupt: 'skull', card: 'c-zvonok', glok: 'bolt', trade: 'deal', 'trade-ok': 'deal', gift: 'gift', goon: 'fist', start: 'flag', join: 'plus' };
+const LOG_IC = { boom: 'flame', dice: 'dice', buy: 'house', rent: 'coin', salary: 'coin', loss: 'coin', sell: 'coin', win: 'trophy', strelka: 'sword', omon: 'siren', police: 'siren', jail: 'lock', bankrupt: 'skull', card: 'c-zvonok', glok: 'bolt', trade: 'deal', 'trade-ok': 'deal', gift: 'gift', goon: 'fist', start: 'flag', join: 'plus' };
 function appendLog(l, live) {
   const box = $('#log');
   if (!box) return;
@@ -1175,11 +1298,12 @@ function appendLog(l, live) {
   const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
   if (nearBottom || !live) box.scrollTop = box.scrollHeight;
   if (!live) return;
-  if (l.kind === 'omon' && /выехал/.test(l.text)) { SFX.play('omon'); flash('ОМОН ВЫЕХАЛ', 'omon'); }
+  if (l.kind === 'omon' && /выехал/.test(l.text)) { flash('ОМОН ВЫЕХАЛ', 'omon'); }
+  else if (l.kind === 'boom') {}
   else if (l.kind === 'omon' && /БЕСПРЕДЕЛ/.test(l.text)) { SFX.play('omon'); flash('БЕСПРЕДЕЛ', 'omon'); }
   else if (l.kind === 'omon') SFX.play('jail');
   else if (SOUND_BY_KIND[l.kind]) SFX.play(SOUND_BY_KIND[l.kind]);
-  if (l.kind === 'bankrupt') flash(l.text, 'dead');
+  if (l.kind === 'bankrupt') { flash(l.text, 'dead'); SFX.play('boom'); explodeAt($(`.pc[data-pid="${l.pid}"]`)); shake('shake-big'); }
 }
 
 function bubble(pid, text) {
@@ -1212,7 +1336,7 @@ function showFx(fx) {
     let n = 0;
     const iv = setInterval(() => {
       $$('.fx-pw', ov).forEach((e) => { e.textContent = n < 10 ? 1 + Math.floor(Math.random() * 12) : e.dataset.final; });
-      if (++n > 10) { clearInterval(iv); ov.classList.add('done'); SFX.play(fx.win ? 'strelka-win' : 'strelka-lose'); }
+      if (++n > 10) { clearInterval(iv); ov.classList.add('done'); SFX.play(fx.win ? 'strelka-win' : 'strelka-lose'); shake(fx.win ? 'shake-big' : 'shake'); }
     }, 70);
   } else if (fx.type === 'card') {
     SFX.play('card');
@@ -1229,6 +1353,11 @@ function showFx(fx) {
     const p = byId(fx.pid);
     SFX.play('casino-win');
     overlay(`<div class="fx casino"><div class="fx-title">ДЖЕКПОТ</div><div class="fx-sub">${p ? esc(p.name) : ''} встал ровно на Общак</div><div class="pot-big">+$${fx.amount}</div></div>`, 1800).classList.add('done');
+  } else if (fx.type === 'chase') {
+    const p = byId(fx.pid);
+    if (fx.pid !== myId) flash(fx.ok ? `${p ? p.name : ''} ушёл от погони` : `${p ? p.name : ''} приняли`, fx.ok ? 'deal' : 'dead');
+  } else if (fx.type === 'act') {
+    showAct(fx);
   } else if (fx.type === 'event') {
     SFX.play('omon');
     overlay(`<div class="fx event-fx"><div class="ev-kicker">Событие района</div><div class="fx-title">${esc(fx.title)}</div><div class="ev-text">${esc(fx.text)}</div></div>`, 3200);
@@ -1422,6 +1551,10 @@ function showRules() {
     <p><b>Наезд толпой.</b> Если хозяин точки — самый богатый, можно позвать остальных. Каждый вписавшийся даёт +2 к силе. Отожмёте — каждому $50 с хозяина, сольёте — каждый платит ему $40.</p>
     <p><b>Налоговая</b> берёт 10% от всего капитала — денег и точек. Богатым больнее.</p>
     <p><b>События района.</b> Каждый третий круг — событие: Час пик (доля ×2), Жирный круг (Общак вдвое), Передел (+2 нападающим), Облава, Дефолт, Амнистия. Последние 3 круга — доля ×1.5.</p>
+    <p><b>Козыри.</b> Перед броском можно разыграть один козырь: Подрыв ($120) — минус звезда у чужой точки, а без звёзд точка уходит банку; Перестрелка — кубик + сила, проигравший отдаёт $120 и братка; Стук ($80) — соперник едет в тюрьму; Крыша — защищает от следующего козыря. Новый козырь — за каждый проход Общака, максимум 3.</p>
+    <p><b>Погоня.</b> Встал на «Ментов» или на тебя стуканули — можно уйти от погони: веди машину пальцем, объезжай тачки и баррикады ДПС, собирай нитро. Продержался — не сидишь и получаешь монеты. Разбил машину или догнали — тюрьма.</p>
+    <p><b>Казино</b> на игровые $: ставки до $1000. Автомат щедрый: пара — ставка +50%, семёрки ×25. Рулетка: цвет и чёт/нечет ×2, дюжина ×3, зеро ×36; на зеро ставка на цвет возвращается наполовину.</p>
+    <p><b>Призы за катку</b> — монеты: 1 место ${EARN.game + EARN.place[0]}, 2 — ${EARN.game + EARN.place[1]}, 3 — ${EARN.game + EARN.place[2]}, остальным ${EARN.game}. С ботами — половина.</p>
     <p><b>Сделки</b> — в любой момент можно продать свою точку или выкупить чужую, кнопка сделки вверху экрана.</p>
     <p><b>Персонажи</b> — у каждого своя фишка, посмотреть можно в «Персонажах». А иногда при старте одному игроку выпадает тайный <b>Будка</b>: заговорщик, на которого действует только Глок.</p>
     <p><b>Розыск</b> растёт от покупок, прокачек, стрелок и казино. На пятом огоньке выезжает ОМОН. Кого накроет — штраф или минус браток.</p>
@@ -1504,9 +1637,11 @@ function renderShop(tab, focus) {
       <div class="hint center-t">${starsOk ? 'Оплата через Telegram Stars — прямо в Telegram, без карт.' : config.tg ? 'Чтобы купить монеты, войди через Telegram на главном экране или открой игру в боте.' : 'Покупка монет заработает, когда подключат бота (см. README).'}</div>
       <div class="free-coins">
         <b>Монеты бесплатно</b>
-        <div>${ic('calendar')}Бонус дня: +${EARN.daily} (серия до 7 дней — до +${EARN.daily + 30})</div>
-        <div>${ic('dice')}Каждая партия: +${EARN.game}, победа: +${EARN.win} (до ${EARN.dayCap} в день)</div>
-        <button class="btn small gold" id="daily2" ${!wallet || wallet.daily_on === todayStr() ? 'disabled' : ''}>${!wallet || wallet.daily_on === todayStr() ? 'Бонус уже забран — приходи завтра' : 'Забрать бонус дня'}</button>
+        <div>${ic('calendar')}Бонус дня: серия ${EARN.ladder.join(' → ')} монет, на 7-й день — ещё прокрут колеса</div>
+        <div>${ic('star')}Колесо фортуны: бесплатный прокрут каждый день — монеты, персонажи, рамки, темы</div>
+        <div>${ic('trophy')}Призы за катку: 1 место +${EARN.game + EARN.place[0]}, 2 — +${EARN.game + EARN.place[1]}, 3 — +${EARN.game + EARN.place[2]}, остальным +${EARN.game}. С ботами — половина</div>
+        <div>${ic('siren')}Ушёл от погони: +${EARN.chase} (всего до ${EARN.dayCap} в день)</div>
+        <button class="btn small gold" id="daily2">${dailyReady() ? 'Забрать бонус и крутить колесо' : 'Бонус дня и колесо'}</button>
       </div>`;
   } else if (shopTab === 'chars') {
     body = `<div class="shop-grid chars-grid">${list('char').map(([id, v]) => item(id, v, medal(v.char), charCap(v.char))).join('')}</div>
@@ -1541,7 +1676,7 @@ function renderShop(tab, focus) {
   $$('[data-buy]').forEach((b) => b.onclick = () => buyItem(b.dataset.buy, b));
   $$('[data-equip]').forEach((b) => b.onclick = () => equipItem(b.dataset.slot, ((wallet.equip || {})[b.dataset.slot] === b.dataset.equip) ? null : b.dataset.equip));
   $$('[data-pack]').forEach((b) => b.onclick = () => buyPack(b.dataset.pack, b));
-  if ($('#daily2')) $('#daily2').onclick = claimDaily;
+  if ($('#daily2')) $('#daily2').onclick = showBonus;
 }
 async function buyItem(id, btn) {
   const it = SHOP[id];
@@ -1559,11 +1694,70 @@ async function equipItem(slot, item) {
   try { wallet = (await api('/api/equip', { slot, item })).wallet; applyTheme(); SFX.play('click'); } catch (e) { toast(e.message); }
   renderShop(shopTab);
 }
+// ---------- Бонус дня и колесо фортуны ----------
+function wheelPrizeSVG() {
+  const W = G.WHEEL, n = W.length, R = 120, cx = 130, cy = 130;
+  const cols = ['#2a1d0a', '#3a0d16', '#1a2a3a', '#2a103a', '#0f2a1c', '#3a2a0a', '#1a1a2e', '#3a1020'];
+  const icn = { coins: 'coin', char: 'masks', frame: 'frame', dice: 'dice', title: 'tag', theme: 'star' };
+  const pt = (a, r) => [cx + r * Math.cos((a - 90) * Math.PI / 180), cy + r * Math.sin((a - 90) * Math.PI / 180)];
+  let s = '';
+  W.forEach((seg, i) => {
+    const a0 = i * 360 / n, a1 = (i + 1) * 360 / n, [x0, y0] = pt(a0, R), [x1, y1] = pt(a1, R);
+    s += `<path d="M${cx},${cy} L${x0.toFixed(1)},${y0.toFixed(1)} A${R},${R} 0 0 1 ${x1.toFixed(1)},${y1.toFixed(1)} Z" fill="${cols[i % cols.length]}" stroke="#c9962e" stroke-width="1.5"/>`;
+    const am = (a0 + a1) / 2, [tx, ty] = pt(am, R * 0.64), [ix, iy] = pt(am, R * 0.86);
+    s += `<g transform="translate(${tx.toFixed(1)},${ty.toFixed(1)}) rotate(${am})"><text text-anchor="middle" dominant-baseline="middle" font-size="11" font-weight="800" fill="#ffe7a8" font-family="Manrope,sans-serif">${seg.label}</text></g>`;
+    s += `<g transform="translate(${(ix - 9).toFixed(1)},${(iy - 9).toFixed(1)})"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="color:#f5c542" stroke="#f5c542" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${window.IC.path ? window.IC.path(icn[seg.kind]) : ''}</svg></g>`;
+  });
+  const bulbs = Array.from({ length: 24 }, (_, k) => { const [bx, by] = pt(k * 15, R + 7); return `<circle cx="${bx.toFixed(1)}" cy="${by.toFixed(1)}" r="3" class="wb" style="--k:${k}"/>`; }).join('');
+  return `<svg viewBox="0 0 260 260" class="fw-svg"><circle cx="${cx}" cy="${cy}" r="${R + 12}" fill="#1a1006" stroke="#c9962e" stroke-width="3"/>${bulbs}<g class="fw-rot">${s}</g><circle cx="${cx}" cy="${cy}" r="22" fill="url(#fwg)" stroke="#c9962e" stroke-width="2"/><defs><radialGradient id="fwg"><stop offset="0" stop-color="#ffe7a8"/><stop offset="1" stop-color="#9a6a14"/></radialGradient></defs></svg>`;
+}
+function showBonus() {
+  if (!wallet) return toast('Профиль ещё грузится');
+  const L = EARN.ladder, claimed = wallet.daily_on === todayStr();
+  const yest = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const cur = claimed ? wallet.streak : wallet.daily_on === yest ? (wallet.streak % 7) + 1 : 1; // какой день серии сегодня
+  const tot = G.WHEEL.reduce((a, x) => a + x.w, 0);
+  const m = modal(`<div class="bonus">
+    <h2>Бонус дня</h2>
+    <p class="hint">Заходи каждый день — награда растёт. Пропустил день — серия начинается заново. На 7-й день — 150 монет и лишний прокрут колеса.</p>
+    <div class="ladder">${L.map((v, i) => { const d = i + 1, st = d < cur || (d === cur && claimed) ? 'got' : d === cur ? 'now' : ''; return `<div class="ld ${st} ${d === 7 ? 'big' : ''}"><small>День ${d}</small>${ic('coin', 'coin')}<b>${v}</b>${d === 7 ? '<i>+ прокрут</i>' : ''}</div>`; }).join('')}</div>
+    <button class="btn gold big" id="bclaim" ${claimed ? 'disabled' : ''}>${claimed ? 'Завтра — ' + L[cur >= 7 ? 0 : cur] + ' монет' : 'Забрать ' + L[cur - 1] + ' монет'}</button>
+    <h2 class="fw-h">Колесо фортуны</h2>
+    <div class="fw"><div class="fw-wheel">${wheelPrizeSVG()}</div><i class="fw-ptr"></i></div>
+    <button class="btn red big" id="bspin" ${spinReady() ? '' : 'disabled'}>${spinReady() ? (wallet.spin_on !== todayStr() ? 'Крутить бесплатно' : `Крутить · бонусных: ${wallet.bonus_spins}`) : 'Следующий прокрут завтра'}</button>
+    <details class="odds"><summary>Шансы выпадения</summary>${G.WHEEL.map((x) => `<div><span>${x.label}</span><b>${Math.round((x.w / tot) * 100)}%</b></div>`).join('')}<p class="hint">Персонаж, рамка, кубики, титул или тема — случайные из тех, что у тебя ещё нет. Если такого всё уже есть — 80 монет.</p></details>
+  </div>`);
+  $('#bclaim', m).onclick = async () => { await claimDaily(); m.closeModal(); showBonus(); if (screen === null || !st) renderHome(); };
+  $('#bspin', m).onclick = async (e) => {
+    const btn = e.currentTarget; btn.disabled = true;
+    let d;
+    try { d = await api('/api/spin', {}); } catch (er) { toast(er.message); btn.disabled = false; return; }
+    const idx = G.WHEEL.findIndex((x) => x.id === d.prize.seg), n = G.WHEEL.length;
+    const rot = $('.fw-rot', m);
+    const target = 360 * 6 + (360 - (idx + 0.5) * 360 / n) + (Math.random() * 0.6 - 0.3) * 360 / n;
+    rot.style.transformOrigin = '130px 130px';
+    rot.style.transition = 'transform 4.2s cubic-bezier(.12,.7,.12,1)';
+    requestAnimationFrame(() => { rot.style.transform = `rotate(${target}deg)`; });
+    let t = 0; const tk = () => { SFX.play('tick', 0.4); if (++t < 26) setTimeout(tk, 60 + t * t * 0.9); }; tk();
+    setTimeout(() => {
+      wallet = d.wallet; refreshCoins(); applyTheme();
+      const it = d.prize.item && SHOP[d.prize.item];
+      const prev = it ? (it.kind === 'char' ? `<div class="pz-pic">${medal(it.char)}</div>` : it.kind === 'frame' ? `<span class="pl-pic big ${d.prize.item}">${myFace()}</span>`
+        : it.kind === 'theme' ? `<div class="theme-prev" data-theme="${d.prize.item.replace('theme-', '')}"><i class="tp-board"><i class="tp-felt"></i></i><i class="tp-cta"></i></div>`
+        : it.kind === 'dice' && assetFor(d.prize.item) ? `<img class="si-img" src="${assetFor(d.prize.item)}" alt="">` : `<div class="pz-ic">${ic(it.kind === 'title' ? 'tag' : 'dice')}</div>`) : `<div class="pz-ic">${ic('coin', 'coin')}</div>`;
+      const name = it ? (it.kind === 'char' ? CHARS[it.char].name : it.name) : `${d.prize.amount} монет`;
+      SFX.play('casino-win'); SFX.vibe([60, 40, 120]);
+      const o = overlay(`<div class="fx prize-fx"><div class="ev-kicker">Колесо фортуны</div>${prev}<div class="fx-title">${esc(name)}</div><div class="ev-text">${it ? (it.kind === 'char' ? 'Новый персонаж — уже в «Персонажах».' : 'Уже у тебя — надень в магазине.') : d.prize.dup ? 'Такое всё уже есть — держи монеты.' : 'Монеты уже на счету.'}</div></div>`, 3600);
+      coinBurst(o, it ? 30 : 18);
+      m.closeModal(); setTimeout(showBonus, 400);
+    }, 4400);
+  };
+}
 async function claimDaily() {
   try {
     const d = await api('/api/daily', {});
     wallet = d.wallet;
-    if (d.ok) { SFX.play('casino-win'); toast(`+${d.amount} монет · серия ${d.streak} ${d.streak > 1 ? 'дня' : 'день'}`); flash(`+${d.amount} монет`, 'deal'); }
+    if (d.ok) { SFX.play('casino-win'); toast(`+${d.amount} монет · день ${d.streak} серии${d.spin ? ' · + бонусный прокрут колеса' : ''}`); flash(`+${d.amount} монет`, 'deal'); }
     else toast('Бонус уже забран — приходи завтра');
   } catch (e) { toast(e.message); }
   refreshCoins();

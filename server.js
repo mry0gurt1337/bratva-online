@@ -41,7 +41,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
-const PUBLIC_RE = /^(index\.html|style\.css|game\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
+const PUBLIC_RE = /^(index\.html|style\.css|game\.js|chase\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
 app.get('/:f?', (req, res, next) => {
   const f = req.params.f || 'index.html';
   if (!PUBLIC_RE.test(f)) return next();
@@ -97,7 +97,29 @@ app.post('/api/me', wrap(async (req, res) => {
 app.post('/api/daily', wrap(async (req, res) => {
   const a = who(req);
   if (!a || limited(req, 5)) return res.status(429).json({ error: 'Не так быстро' });
-  res.json(await store.claimDaily(a.key, EARN.daily));
+  res.json(await store.claimDaily(a.key, EARN.ladder));
+}));
+// Колесо фортуны
+app.post('/api/spin', wrap(async (req, res) => {
+  const a = who(req);
+  if (!a) return res.status(400).json({ error: 'Нужен профиль' });
+  if (limited(req, 6)) return res.status(429).json({ error: 'Не так быстро' });
+  if (!(await store.useSpin(a.key))) return res.status(400).json({ error: 'Прокрут уже был сегодня — приходи завтра' });
+  const total = G.WHEEL.reduce((s, x) => s + x.w, 0);
+  let x = crypto.randomInt(total), seg = G.WHEEL[0];
+  for (const s of G.WHEEL) { if ((x -= s.w) < 0) { seg = s; break; } }
+  const w = await store.wallet(a.key);
+  let prize = { seg: seg.id, kind: seg.kind };
+  if (seg.kind === 'coins') { await store.credit(a.key, seg.amount, 'wheel'); prize.amount = seg.amount; }
+  else {
+    const pool = Object.entries(SHOP).filter(([id, v]) => v.kind === seg.kind && !w.items.includes(id)).map(([id]) => id);
+    if (pool.length && await store.grantItem(a.key, pool[crypto.randomInt(pool.length)].toString())) {
+      // grantItem уже записал; узнаём, что именно выдали
+      const after = await store.wallet(a.key);
+      prize.item = after.items.find((i) => !w.items.includes(i));
+    } else { await store.credit(a.key, 80, 'wheel'); prize.amount = 80; prize.dup = true; }
+  }
+  res.json({ prize, wallet: await store.wallet(a.key) });
 }));
 app.post('/api/buy', wrap(async (req, res) => {
   const a = who(req), id = String((req.body || {}).item || '');
@@ -180,7 +202,7 @@ function makePlayer(r, name, char, account, bot = false) {
   };
 }
 const freshStats = () => ({
-  money: C.START_MONEY, auth: 0, goons: 0, pos: 0, jail: 0, bankrupt: false, doubles: 0, extra: false,
+  money: C.START_MONEY, auth: 0, goons: 0, pos: 0, jail: 0, bankrupt: false, doubles: 0, extra: false, hand: [], shield: false, usedAct: false,
   st: { strelkaWon: 0, strelkaTotal: 0, glok: 0, rentIn: 0, rentOut: 0, casino: 0, jail: 0, bought: 0, maxMoney: C.START_MONEY },
 });
 
@@ -204,7 +226,7 @@ function publicState(r) {
   return {
     code: r.code, hostId: r.hostId, status: r.status, settings: r.settings,
     players: r.players.map((p) => ({
-      id: p.id, name: p.name, char: p.char, color: p.color, money: p.money, auth: p.auth,
+      id: p.id, name: p.name, char: p.char, color: p.color, money: p.money, auth: p.auth, hand: p.hand || [], shield: !!p.shield, usedAct: !!p.usedAct,
       goons: p.goons, pos: p.pos, jail: p.jail, bankrupt: p.bankrupt, bot: p.bot,
       connected: p.bot || p.connected, tg: !!(p.account && p.account.tg), photo: p.account && p.account.photo,
       frame: p.cos.frame || null, dice: p.cos.dice || null, title: p.cos.title || null,
@@ -214,6 +236,7 @@ function publicState(r) {
     logs: r.logs, dice: r.dice, lastMove: r.lastMove, fx: r.fx, round: r.round,
     winner: r.winner, standings: r.standings, titles: r.titles, sealed: r.sealed,
     offers: r.offers.map(({ id, from, to, cell, price, mode, until }) => ({ id, from, to, cell, price, mode, ms: Math.max(0, until - Date.now()) })),
+    chase: r.chase ? { seq: r.chase.seq, pid: r.chase.pid, kind: r.chase.kind } : null,
     crowd: r.crowd ? { seq: r.crowd.seq, a: r.crowd.a, o: r.crowd.o, cell: r.crowd.cell, joins: r.crowd.joins, ms: T(r.crowd.ms) } : null,
     event: r.event && r.event.round === r.round ? { id: r.event.id, title: r.event.title, text: r.event.text } : null, finale: finalStretch(r),
     glokTask: r.glokTask ? { seq: r.glokTask.seq, prize: r.glokTask.prize, ms: T(r.glokTask.ms), line: r.glokTask.line, taps: r.glokTask.taps } : null,
@@ -264,6 +287,7 @@ function armTimer(r) {
 function startTurn(r) {
   if (r.status !== 'PLAYING') return;
   const p = cur(r);
+  p.usedAct = false;
   if (p.jail > 0) { r.phase = 'DECIDE'; r.pending = { type: 'JAIL', bail: C.BAIL }; }
   else { r.phase = 'ROLL'; r.pending = null; }
   armTimer(r);
@@ -287,6 +311,7 @@ function moveBy(r, p, steps) {
     const poorest = al.length > 2 && al.every((o) => o === p || netWorth(r, o) > netWorth(r, p));
     const help = poorest ? C.CATCHUP : 0;
     p.money += sal + help; track(p);
+    giveCard(r, p, 'Общак подогнал козырь');
     log(r, `${p.name} заглянул в Общак: +$${sal}${help ? ` и ещё +$${help} — Общак своих не бросает` : ''}`, 'salary', { pid: p.id });
   }
 }
@@ -362,7 +387,7 @@ function land(r) {
       log(r, `${p.name} покачался в Качалке — без найма`, 'info', { pid: p.id });
       return afterAction(r);
     case 'casino': {
-      const bets = [50, 100, 200].filter((x) => x <= p.money);
+      const bets = [50, 100, 250, 500, 1000].filter((x) => x <= p.money);
       if (bets.length) return ask(r, { type: 'CASINO', bets });
       log(r, `${p.name} постоял у Казино — денег на фишки нет`, 'info');
       return afterAction(r);
@@ -382,6 +407,7 @@ function land(r) {
         log(r, `Оборотень ${p.name} зашёл к своим в отдел — сидеть не будет`, 'goon', { pid: p.id });
         return afterAction(r, 400);
       }
+      if (willJail(p)) return chase(r, p, 'police', () => sendToJail(r, p), () => afterAction(r, 400));
       sendToJail(r, p); return afterAction(r, 400);
     case 'jail': log(r, `${p.name} навестил кентов в тюрьме`, 'info'); return afterAction(r);
     default: return afterAction(r);
@@ -442,6 +468,7 @@ const CARDS = [
     const n = Object.values(r.props).filter((v) => v.owner === p.id).reduce((s, v) => s + 1 + v.level, 0);
     if (n) pay(r, p, n * 20, null);
   } },
+  { t: 'Подогнали козырь из-под полы', f: (r, p) => giveCard(r, p, null) },
   { t: 'Нашёл ключ от общака: забирай половину джекпота', f: (r, p) => { const h = Math.floor(r.pot / 2); r.pot -= h; p.money += h; } },
 ];
 function drawCard(r, p) {
@@ -475,6 +502,7 @@ function drawCard(r, p) {
 // ---------- Деньги и банкротство ----------
 // to === null — деньги уходят в джекпот Общака
 function pay(r, p, amount, to) {
+  if (p.bankrupt || amount <= 0) return 0; // с разорённого больше нечего взять
   if (r._glok && has(p, 'budka')) amount *= 2; // на Будку действует только Глок — и бьёт вдвое
   p.money -= amount;
   if (p.money < 0) liquidate(r, p);
@@ -514,7 +542,8 @@ const DEFAULTS = { BUY: 'no', UPGRADE: 'no', GYM: 'no', CASINO: 'skip', OCHKO: '
 
 // ---------- Казино «Три топора» ----------
 // Три игры: однорукий бандит, рулетка, очко (21 на 36 карт). Всё считает сервер.
-const SLOT_SYMS = [['cherry', 30, 3], ['lemon', 25, 4], ['bell', 20, 6], ['diamond', 15, 10], ['seven', 10, 25]];
+// Автомат щедрее: семёрки выпадают чаще, пара возвращает ставку +50%. Отдача ~101% — казино в игре в плюс игроку, но поднимает розыск.
+const SLOT_SYMS = [['cherry', 30, 3], ['lemon', 22, 4], ['bell', 18, 6], ['diamond', 16, 10], ['seven', 14, 25]];
 const SLOT_NAMES = { cherry: 'вишни', lemon: 'лимона', bell: 'колокола', diamond: 'бриллианта', seven: 'семёрки' };
 const RED = new Set([1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
 const RANKS = [['6', 6], ['7', 7], ['8', 8], ['9', 9], ['10', 10], ['В', 2], ['Д', 3], ['К', 4], ['Т', 11]];
@@ -550,19 +579,24 @@ function casinoPlay(r, p, q, choice) {
     const syms = reels.map((x) => x[0]);
     let profit = 0, text;
     if (syms[0] === syms[1] && syms[1] === syms[2]) { profit = bet * (reels[0][2] - 1); text = syms[0] === 'seven' ? 'ТРИ СЕМЁРКИ, ДЖЕКПОТ' : `три ${SLOT_NAMES[syms[0]]}`; }
-    else if (syms[0] === syms[1] || syms[1] === syms[2] || syms[0] === syms[2]) { profit = Math.round(bet * 0.2); text = 'пара на автомате'; }
+    else if (syms[0] === syms[1] || syms[1] === syms[2] || syms[0] === syms[2]) { profit = Math.round(bet * 0.5); text = 'пара на автомате'; }
     const won = profit > 0 ? casinoWin(r, p, profit, text, {}) : 0;
     if (!profit) casinoLose(r, p, bet, 'автомат съел ставку');
     r.fx = { type: 'slots', pid: p.id, bet, reels: syms, won, seq: ++r.fxSeq };
     return 3000;
   }
   if (game === 'roulette') {
-    const color = ['red', 'black', 'zero'].includes(pick) ? pick : 'red';
+    // ставки: цвет (×2), чёт/нечет (×2), дюжина (×3), зеро (×36). На зеро ставки на цвет и чётность возвращаются наполовину.
+    const BETS = { red: 1, black: 1, even: 1, odd: 1, d1: 2, d2: 2, d3: 2, zero: 35 };
+    const color = BETS[pick] != null ? pick : 'red';
     const n = rnd(37);
     const res = n === 0 ? 'zero' : RED.has(n) ? 'red' : 'black';
-    const name = { red: 'красное', black: 'чёрное', zero: 'зеро' };
+    const hit = (k) => n !== 0 && ((k === 'red' && res === 'red') || (k === 'black' && res === 'black') || (k === 'even' && n % 2 === 0) || (k === 'odd' && n % 2 === 1)
+      || (k === 'd1' && n <= 12) || (k === 'd2' && n > 12 && n <= 24) || (k === 'd3' && n > 24)) || (k === 'zero' && n === 0);
+    const name = { red: 'красное', black: 'чёрное', zero: 'зеро', even: 'чёт', odd: 'нечет', d1: '1–12', d2: '13–24', d3: '25–36' };
     let won = 0;
-    if (res === color) won = casinoWin(r, p, bet * (color === 'zero' ? 35 : 1), `рулетка, ${n} ${name[res]}`, {});
+    if (hit(color)) won = casinoWin(r, p, bet * BETS[color], `рулетка, ${n} ${name[res]}, ставка на ${name[color]}`, {});
+    else if (n === 0 && ['red', 'black', 'even', 'odd'].includes(color)) { const half = Math.round(bet / 2); pay(r, p, half, null); log(r, `${p.name}: зеро — половина ставки вернулась, −$${half}`, 'loss', { pid: p.id }); }
     else casinoLose(r, p, bet, `рулетка, выпало ${n} ${name[res]}, а ставил на ${name[color]}`);
     r.fx = { type: 'roulette', pid: p.id, bet, n, color, res, won, seq: ++r.fxSeq };
     return 4200;
@@ -717,6 +751,123 @@ function strelka(r, p, owner, q, crew = []) {
   }
 }
 
+// ---------- Погоня ----------
+// Когда игрока должны закрыть — он может уйти от ментов в мини-игре. Ушёл — без тюрьмы и +монеты, нет — сидит.
+const CHASE_MS = 34000;
+const willJail = (p) => !has(p, 'budka') && !has(p, 'advokat') && !(p.goons > 0);
+function chase(r, p, kind, onFail, cont) {
+  const live = !p.bot && p.connected && p.socketId;
+  if (!live) {
+    const ok = rnd(100) < 40;
+    log(r, ok ? `${p.name} ушёл от ментов дворами` : `Менты догнали ${p.name}`, 'police', { pid: p.id });
+    if (!ok) onFail();
+    return cont();
+  }
+  const seq = ++r.fxSeq;
+  r.chase = { seq, pid: p.id, kind, onFail, cont };
+  r.phase = 'CHASE'; r.pending = null;
+  log(r, `ПОГОНЯ! ${p.name} уходит от ментов`, 'police', { pid: p.id });
+  sync(r);
+  later(r, T(CHASE_MS), () => chaseEnd(r, seq, false));
+}
+function chaseEnd(r, seq, ok) {
+  const c = r.chase;
+  if (!c || c.seq !== seq) return;
+  r.chase = null; clearTimer(r);
+  const p = byId(r, c.pid);
+  if (p && ok) {
+    log(r, `${p.name} ушёл от погони — менты остались ни с чем`, 'goon', { pid: p.id });
+    if (p.account) store.credit(p.account.key, EARN.chase, 'game', EARN.dayCap).then((n) => { if (n && p.socketId) io.to(p.socketId).emit('earned', { amount: n, chase: true }); }).catch(() => {});
+  } else if (p) { log(r, `Погоня окончена — ${p.name} приняли`, 'jail', { pid: p.id }); c.onFail(); }
+  r.fx = { type: 'chase', pid: c.pid, ok: !!ok, seq: ++r.fxSeq };
+  sync(r);
+  c.cont();
+}
+
+// ---------- Козыри ----------
+const ACTIONS = G.ACTIONS;
+const CARD_POOL = ['boom', 'boom', 'shoot', 'shoot', 'shoot', 'snitch', 'snitch', 'roof', 'roof'];
+const randCard = () => CARD_POOL[rnd(CARD_POOL.length)];
+function giveCard(r, p, why) {
+  if (!p.hand || p.hand.length >= G.MAX_HAND) return;
+  const c = randCard();
+  p.hand.push(c);
+  if (why) log(r, `${why}: ${p.name} получил «${ACTIONS[c].name}»`, 'card', { pid: p.id });
+}
+const ACT_MS = { boom: 3000, shoot: 3600, snitch: 3000, roof: 1600, blocked: 2200 };
+function playAct(r, p, card, targetId, cell) {
+  if (r.phase !== 'ROLL' || cur(r) !== p || p.usedAct || !p.hand.includes(card) || !ACTIONS[card]) return false;
+  const A = ACTIONS[card];
+  if (p.money < A.cost) return false;
+  let t = null;
+  if (A.target === 'player') { t = byId(r, targetId); if (!t || t === p || t.bankrupt) return false; }
+  if (A.target === 'cell') { const pr = r.props[cell]; if (!pr || pr.owner === p.id) return false; t = byId(r, pr.owner); if (!t || t.bankrupt) return false; }
+  p.hand.splice(p.hand.indexOf(card), 1);
+  p.usedAct = true;
+  if (A.cost) pay(r, p, A.cost, null);
+  const fx = { type: 'act', kind: card, a: p.id, t: t && t.id, cell, seq: ++r.fxSeq };
+  if (t && (t.shield || has(t, 'budka') || (card === 'snitch' && has(t, 'oboroten')))) {
+    const why = t.shield ? 'крыша прикрыла' : has(t, 'budka') ? 'Будку не взять — у него всё схвачено' : 'Оборотень — свой в отделе';
+    if (t.shield) t.shield = false;
+    fx.blocked = why;
+    log(r, `${p.name} разыграл «${A.name}» против ${t.name}, но ${why}`, 'goon', { pid: p.id });
+  } else switch (card) {
+    case 'roof':
+      p.shield = true;
+      log(r, `${p.name} поставил крышу — следующий козырь против него не пройдёт`, 'goon', { pid: p.id });
+      break;
+    case 'boom': {
+      const pr = r.props[cell], c = BOARD[cell];
+      heat(r, 2);
+      if (pr.level > 0) { pr.level -= 1; fx.res = 'star'; log(r, `ПОДРЫВ! ${p.name} взорвал «${c.name}» у ${t.name} — минус звезда`, 'boom', { pid: p.id }); }
+      else { delete r.props[cell]; fx.res = 'gone'; log(r, `ПОДРЫВ! «${c.name}» ${t.name} взлетела на воздух — точка ушла банку`, 'boom', { pid: p.id }); }
+      break;
+    }
+    case 'shoot': {
+      const aR = d6(), tR = d6(), aP = aR + power(p), tP = tR + power(t);
+      const win = aP > tP, w = win ? p : t, l = win ? t : p;
+      heat(r, 1);
+      const got = pay(r, l, 120, w);
+      const lostGoon = l.goons > 0; if (lostGoon) l.goons -= 1;
+      Object.assign(fx, { aP, tP, aR, tR, win });
+      log(r, `ПЕРЕСТРЕЛКА: ${p.name} ${aP} против ${t.name} ${tP} — ${w.name} победил, ${l.name} отдал $${got}${lostGoon ? ' и братка' : ''}`, 'strelka', { pid: p.id });
+      break;
+    }
+    case 'snitch':
+      log(r, `${p.name} стуканул на ${t.name} — менты выехали`, 'police', { pid: p.id });
+      if (willJail(t) && !t.bot && t.connected) fx.res = 'chase';
+      else { sendToJail(r, t); fx.res = t.jail ? 'jail' : 'saved'; }
+      break;
+  }
+  r.fx = fx;
+  r.phase = 'ANIM'; r.pending = null;
+  sync(r);
+  const resume = () => {
+    if (r.status !== 'PLAYING') return;
+    if (checkWin(r)) return;
+    if (p.bankrupt) return endTurn(r);
+    r.phase = 'ROLL'; armTimer(r); sync(r);
+  };
+  if (fx.res === 'chase') later(r, T(2400), () => chase(r, t, 'snitch', () => sendToJail(r, t), resume));
+  else later(r, T(fx.blocked ? ACT_MS.blocked : ACT_MS[card]), resume);
+  return true;
+}
+// боты иногда пускают козыри против лидера
+function botCard(r, p) {
+  if (!p.hand.length || rnd(100) >= 40) return false;
+  const leader = active(r).filter((o) => o !== p).sort((a, b) => netWorth(r, b) - netWorth(r, a))[0];
+  if (!leader) return false;
+  const pick = (c) => p.hand.includes(c) && p.money >= ACTIONS[c].cost + 150;
+  if (pick('roof') && !p.shield) return playAct(r, p, 'roof');
+  if (pick('boom')) {
+    const best = Object.entries(r.props).filter(([, v]) => v.owner === leader.id).sort((a, b) => b[1].level - a[1].level)[0];
+    if (best) return playAct(r, p, 'boom', null, Number(best[0]));
+  }
+  if (pick('shoot') && power(p) >= power(leader)) return playAct(r, p, 'shoot', leader.id);
+  if (pick('snitch') && !leader.jail) return playAct(r, p, 'snitch', leader.id);
+  return false;
+}
+
 // ---------- Наезд толпой ----------
 // Если хозяин точки — самый богатый, можно позвать остальных вписаться. Каждый вписавшийся даёт +2 к силе.
 const CROWD_POWER = 2, CROWD_MS = 8000;
@@ -767,7 +918,7 @@ function roundStart(r) {
   const R = r.settings.rounds;
   if (R && r.round === R - 2) {
     r.fx = { type: 'event', title: 'ПОСЛЕДНИЕ ДЕНЬКИ', text: 'Осталось 3 круга. Доля со всех точек ×1.5 до конца игры.', seq: ++r.fxSeq };
-    log(r, 'Последние деньки: 3 круга до конца, доля ×1.5', 'omon');
+    log(r, 'Последние деньки: 3 круга до конца, доля ×1.5', 'info');
     return;
   }
   if (r.round >= 3 && r.round % 3 === 0) {
@@ -775,7 +926,7 @@ function roundStart(r) {
     r.event = { id: e.id, title: e.title, text: e.text, round: r.round };
     if (e.now) e.now(r);
     r.fx = { type: 'event', title: e.title, text: e.text, seq: ++r.fxSeq };
-    log(r, `Событие района — ${e.title.toLowerCase()}: ${e.text}`, 'omon');
+    log(r, `Событие района — ${e.title.toLowerCase()}: ${e.text}`, 'info');
   }
 }
 
@@ -1154,8 +1305,10 @@ function finish(r, reason) {
   r.standings.forEach((s, i) => {
     const p = byId(r, s.id);
     if (!p || p.bot || !p.account) return;
-    store.credit(p.account.key, EARN.game + (i === 0 ? EARN.win : 0), 'game', EARN.dayCap)
-      .then((n) => { if (n && p.socketId) io.to(p.socketId).emit('earned', { amount: n, win: i === 0 }); })
+    const humans = r.players.filter((x) => !x.bot).length;
+    const prize = Math.round((EARN.game + (EARN.place[i] || 0)) * (humans > 1 ? 1 : 0.5));
+    store.credit(p.account.key, prize, 'game', EARN.dayCap)
+      .then((n) => { if (n && p.socketId) io.to(p.socketId).emit('earned', { amount: n, win: i === 0, place: i + 1 }); })
       .catch((e) => console.error('earn', e.message));
   });
   r.players.forEach((p) => { p.boosted = false; p.wantBoost = false; });
@@ -1166,7 +1319,7 @@ function botAct(r) {
   if (r.status !== 'PLAYING') return;
   const p = cur(r);
   if (!p.bot) return;
-  if (r.phase === 'ROLL') return doRoll(r);
+  if (r.phase === 'ROLL') { if (!p.usedAct && botCard(r, p)) return; return doRoll(r); }
   if (r.phase !== 'DECIDE' || !r.pending) return;
   const q = r.pending;
   let c = DEFAULTS[q.type];
@@ -1205,10 +1358,11 @@ function startGame(r) {
   Object.assign(r, {
     status: 'PLAYING', turn: 0, props: {}, heat: 0, omon: null, pot: 0, round: 1, inflation: 1,
     winner: null, standings: null, titles: null, dice: null, lastMove: null, fx: null, deck: [],
-    sealed: null, glokTask: null, glokCont: null, turnsSinceGlok: 0, offers: [], crowd: null, event: null,
+    sealed: null, glokTask: null, glokCont: null, turnsSinceGlok: 0, offers: [], crowd: null, event: null, chase: null,
   });
   r.players.filter((p) => p.boosted).forEach((p) => log(r, `${p.name} взял подъёмные: старт $${p.money}`, 'buy', { pid: p.id }));
   log(r, `Сходка началась! Первым ходит ${r.players[0].name}`, 'start');
+  r.players.forEach((p) => { p.hand = [randCard()]; });
   // Тайный персонаж: иногда одному из игроков выпадает Будка
   r.players.forEach((p) => { if (p.baseChar) { p.char = p.baseChar; p.baseChar = null; } });
   if (process.env.BUDKA_ALWAYS || rnd(100) < 18) {
@@ -1428,6 +1582,8 @@ io.on('connection', (socket) => {
 
   const myTurn = () => me && me.r.status === 'PLAYING' && cur(me.r) === me.p;
   on('glok', ({ seq }) => { if (me && me.r.status === 'PLAYING') glokTap(me.r, me.p, seq); });
+  on('act', ({ card, target, cell }) => { if (myTurn()) playAct(me.r, me.p, String(card), String(target || ''), Number(cell)); });
+  on('chaseEnd', ({ seq, ok }) => { if (me && me.r.chase && me.r.chase.pid === me.p.id) chaseEnd(me.r, Number(seq), !!ok); });
   on('crowd', ({ seq }) => { if (me && me.r.status === 'PLAYING') crowdJoin(me.r, me.p, seq); });
   on('roll', () => { if (myTurn() && me.r.phase === 'ROLL') doRoll(me.r); });
   on('decide', ({ choice }) => { if (myTurn() && me.r.phase === 'DECIDE') resolve(me.r, String(choice)); });

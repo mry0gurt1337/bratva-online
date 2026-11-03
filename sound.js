@@ -2,7 +2,7 @@
 // монеты, удары, двери, шаги, страницы, саксофон. Без синтезатора.
 window.SFX = (() => {
   const NAMES = ['dice', 'hop1', 'hop2', 'hop3', 'cash', 'buy', 'card', 'turn', 'chat', 'click', 'tick', 'bad', 'jail',
-    'omon', 'glok', 'fight', 'strelka-win', 'strelka-lose', 'casino-win', 'lose', 'victory', 'trade', 'bankrupt'];
+    'omon', 'glok', 'fight', 'strelka-win', 'strelka-lose', 'casino-win', 'lose', 'victory', 'trade', 'bankrupt', 'boom', 'shots', 'siren', 'snitch'];
   // разные «вариации», чтобы повторяющиеся звуки не надоедали
   const VARY = { dice: 0.06, hop1: 0.1, hop2: 0.1, hop3: 0.1, cash: 0.05, click: 0.04, tick: 0.08, fight: 0.04 };
   let ctx = null, master = null, on = true;

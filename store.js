@@ -29,6 +29,8 @@ async function init() {
         items jsonb NOT NULL DEFAULT '[]', equip jsonb NOT NULL DEFAULT '{}',
         daily_on date, streak int NOT NULL DEFAULT 0, earned_on date, earned_today int NOT NULL DEFAULT 0,
         spent int NOT NULL DEFAULT 0, bought int NOT NULL DEFAULT 0, updated timestamptz NOT NULL DEFAULT now())`);
+      await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS spin_on date`);
+      await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS bonus_spins int NOT NULL DEFAULT 0`);
       await pool.query(`CREATE TABLE IF NOT EXISTS payments (
         charge_id text PRIMARY KEY, key text NOT NULL, pack text NOT NULL, stars int NOT NULL, coins int NOT NULL,
         tg_user bigint, created timestamptz NOT NULL DEFAULT now(), refunded boolean NOT NULL DEFAULT false)`);
@@ -126,10 +128,10 @@ async function count() {
 }
 
 // ---------- Кошельки ----------
-const blank = (key) => ({ key, coins: 0, items: [], equip: {}, daily_on: null, streak: 0, earned_on: null, earned_today: 0, spent: 0, bought: 0 });
+const blank = (key) => ({ key, coins: 0, items: [], equip: {}, daily_on: null, streak: 0, earned_on: null, earned_today: 0, spent: 0, bought: 0, spin_on: null, bonus_spins: 0 });
 function norm(w) {
   const d = (x) => (x instanceof Date ? x.toISOString().slice(0, 10) : x || null);
-  return { coins: +w.coins, items: w.items || [], equip: w.equip || {}, daily_on: d(w.daily_on), streak: +w.streak, earned_on: d(w.earned_on), earned_today: +w.earned_today };
+  return { coins: +w.coins, items: w.items || [], equip: w.equip || {}, daily_on: d(w.daily_on), streak: +w.streak, earned_on: d(w.earned_on), earned_today: +w.earned_today, spin_on: d(w.spin_on), bonus_spins: +(w.bonus_spins || 0) };
 }
 async function wallet(key) {
   if (pool) {
@@ -197,24 +199,54 @@ async function setEquip(key, slot, item) {
 }
 
 // Ежедневный бонус: +daily, серия до 7 дней даёт до +30 сверху
-async function claimDaily(key, base) {
+async function claimDaily(key, ladder) {
   const w = await wallet(key);
   const t = today();
   if (w.daily_on === t) return { ok: false, wallet: w };
   const y = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  const streak = w.daily_on === y ? Math.min(7, w.streak + 1) : 1;
-  const amount = base + (streak - 1) * 5;
+  const streak = w.daily_on === y ? (w.streak % 7) + 1 : 1; // неделя по кругу: после 7-го дня снова 1-й
+  const amount = ladder[streak - 1];
+  const spin = streak === 7 ? 1 : 0; // 7-й день серии — бонусный прокрут колеса
   if (pool) {
-    const r = await pool.query(`INSERT INTO wallets (key, coins, daily_on, streak) VALUES ($1,$2,CURRENT_DATE,$3)
-      ON CONFLICT (key) DO UPDATE SET coins = wallets.coins + $2, daily_on = CURRENT_DATE, streak = $3, updated = now()
-      WHERE wallets.daily_on IS DISTINCT FROM CURRENT_DATE RETURNING *`, [key, amount, streak]);
+    const r = await pool.query(`INSERT INTO wallets (key, coins, daily_on, streak, bonus_spins) VALUES ($1,$2,CURRENT_DATE,$3,$4)
+      ON CONFLICT (key) DO UPDATE SET coins = wallets.coins + $2, daily_on = CURRENT_DATE, streak = $3, bonus_spins = wallets.bonus_spins + $4, updated = now()
+      WHERE wallets.daily_on IS DISTINCT FROM CURRENT_DATE RETURNING *`, [key, amount, streak, spin]);
     if (!r.rows[0]) return { ok: false, wallet: await wallet(key) };
-    return { ok: true, amount, streak, wallet: norm(r.rows[0]) };
+    return { ok: true, amount, streak, spin, wallet: norm(r.rows[0]) };
   }
   const m = memW(key);
-  m.coins += amount; m.daily_on = t; m.streak = streak;
+  m.coins += amount; m.daily_on = t; m.streak = streak; m.bonus_spins = (m.bonus_spins || 0) + spin;
   saveSoon();
-  return { ok: true, amount, streak, wallet: norm(m) };
+  return { ok: true, amount, streak, spin, wallet: norm(m) };
+}
+
+// Колесо фортуны: один бесплатный прокрут в день + бонусные. Возвращает true, если прокрут списан.
+async function useSpin(key) {
+  if (pool) {
+    await pool.query(`INSERT INTO wallets (key) VALUES ($1) ON CONFLICT DO NOTHING`, [key]);
+    const r = await pool.query(`UPDATE wallets SET spin_on = CASE WHEN spin_on IS DISTINCT FROM CURRENT_DATE THEN CURRENT_DATE ELSE spin_on END,
+        bonus_spins = CASE WHEN spin_on IS DISTINCT FROM CURRENT_DATE THEN bonus_spins ELSE bonus_spins - 1 END, updated = now()
+      WHERE key = $1 AND (spin_on IS DISTINCT FROM CURRENT_DATE OR bonus_spins > 0) RETURNING key`, [key]);
+    return !!r.rows[0];
+  }
+  const w = memW(key);
+  if (w.spin_on !== today()) w.spin_on = today();
+  else if ((w.bonus_spins || 0) > 0) w.bonus_spins -= 1;
+  else return false;
+  saveSoon();
+  return true;
+}
+// Выдать предмет бесплатно (приз колеса). false — если уже есть.
+async function grantItem(key, item) {
+  if (pool) {
+    const r = await pool.query(`INSERT INTO wallets (key, items) VALUES ($1, jsonb_build_array($2::text))
+      ON CONFLICT (key) DO UPDATE SET items = wallets.items || to_jsonb($2::text), updated = now() WHERE NOT wallets.items ? $2::text RETURNING key`, [key, item]);
+    return !!r.rows[0];
+  }
+  const w = memW(key);
+  if (w.items.includes(item)) return false;
+  w.items.push(item); saveSoon();
+  return true;
 }
 
 // ---------- Платежи Stars (идемпотентно по charge_id) ----------
@@ -237,4 +269,4 @@ async function findPayment(chargeId) {
   return mem.payments[chargeId] || null;
 }
 
-module.exports = { init, record, addRespect, top, count, playerStats, wallet, credit, spend, setEquip, claimDaily, recordPayment, findPayment, get kind() { return pool ? 'postgres' : 'file'; } };
+module.exports = { init, record, addRespect, top, count, playerStats, wallet, credit, spend, setEquip, claimDaily, useSpin, grantItem, recordPayment, findPayment, get kind() { return pool ? 'postgres' : 'file'; } };
