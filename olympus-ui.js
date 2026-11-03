@@ -64,10 +64,10 @@ window.Olympus = (() => {
         <div class="oy-title"><b>BRATVA</b><span>OLYMPUS</span></div>
         <div class="oy-acc" hidden><small>множитель</small><b>×0</b></div></div>
       <div class="oy-fs" hidden><span>Бесплатные спины</span><b>0</b></div>
-      <div class="oy-frame"><div class="oy-grid"></div><div class="oy-tumble" hidden></div></div>
+      <div class="oy-frame"><div class="oy-sitrow"></div><div class="oy-grid"></div><div class="oy-tumble" hidden></div></div>
       <div class="oy-winline"><span class="oy-msg">${opts.msg || 'Удачи, братва'}</span><b class="oy-win"></b></div>
     </div>`;
-    const v = { root: host.querySelector('.oy'), grid: host.querySelector('.oy-grid'), msg: host.querySelector('.oy-msg'), win: host.querySelector('.oy-win'),
+    const v = { sitN: 0, sitrow: host.querySelector('.oy-sitrow'), root: host.querySelector('.oy'), grid: host.querySelector('.oy-grid'), msg: host.querySelector('.oy-msg'), win: host.querySelector('.oy-win'),
       acc: host.querySelector('.oy-acc'), fs: host.querySelector('.oy-fs'), tumble: host.querySelector('.oy-tumble'), glok: host.querySelector('.oy-glok'), cells: [] };
     // стартовое поле — просто красиво
     const demo = Array.from({ length: COLS * ROWS }, (_, i) => ['crown', 'chain', 'merin', 'pidjak', 'konyak', 'pager', 't', 'k', 'd'][(i * 7 + (i % 5) * 3) % 9]);
@@ -273,6 +273,8 @@ window.Olympus = (() => {
       }
       v.glok.classList.remove('throw'); v.root.classList.remove('strike');
     }
+    // сидельцы бросают ножи — на стороны падают сферы
+    if (o.sit && o.sit.throws && o.sit.throws.length) await sitterThrowsAnim(v, o.sit, sp);
     // сферы: каждая летит в счётчик и ставит штамп «×N»
     if (s.win && s.mults.length) {
       v.glok.classList.add('throw'); S().play('glok', 0.7); lightning(v); say(v, 'mult');
@@ -312,11 +314,69 @@ window.Olympus = (() => {
     el.classList.add('out'); await sleep(300); el.remove();
   }
 
+  // ---------- Сидельцы ----------
+  const KNIFE = `<svg viewBox="0 0 60 16" class="oy-knife-svg"><path d="M2 8 L34 3 L40 8 L34 13Z" fill="#dfe6ee"/><path d="M2 8 L34 3 L34 8Z" fill="#fff" opacity=".6"/><rect x="38" y="5" width="20" height="6" rx="3" fill="#5a3a1e"/><rect x="37" y="4" width="3" height="8" rx="1" fill="#c9a43a"/></svg>`;
+  function sitterHTML(k) { const B = window.BR; return `<span class="oy-sitter" data-k="${k}"><span class="oy-sit-pic">${B ? B.avatar({ char: 'sidelets' }) : ''}</span><i class="oy-sit-ring"></i></span>`; }
+  function renderSit(v, n) { v.sitN = n; v.sitrow.innerHTML = Array.from({ length: n }, (_, k) => sitterHTML(k)).join(''); }
+  async function sittersArrive(v, sit) {
+    renderSit(v, sit.before);
+    if (!sit.arrived) return;
+    v.sitrow.insertAdjacentHTML('beforeend', sitterHTML(sit.before));
+    const el = v.sitrow.lastElementChild; el.classList.add('arrive'); v.sitN = sit.n;
+    v.msg.textContent = sit.n > 1 ? `Подсел ещё один сиделец — их ${sit.n}` : 'Подсел сиделец с перстнем';
+    S().play('card'); S().vibe(20);
+    await sleep(750);
+  }
+  // нож летит от сидельца в борт, рикошетит и падает на сторону; там появляется сфера
+  async function sitterThrowsAnim(v, sit, sp) {
+    const host = v.root, frame = host.querySelector('.oy-frame'), fr = rectIn(frame, host);
+    v.msg.textContent = 'Сидельцы бросают';
+    for (let k = 0; k < sit.throws.length; k++) {
+      const t = sit.throws[k], seat = v.sitrow.children[k % Math.max(1, v.sitrow.children.length)], cell = v.cells[t.i];
+      if (!cell || !seat) continue;
+      const a = rectIn(seat, host), c = rectIn(cell, host);
+      const wallX = t.side === 0 ? fr.x - fr.w / 2 + 8 : t.side === 2 ? fr.x + fr.w / 2 - 8 : (c.x < a.x ? fr.x - fr.w / 2 + 8 : fr.x + fr.w / 2 - 8);
+      const wallY = fr.y - fr.w * 0.05 + (k % 2 ? 20 : -10);
+      const kn = document.createElement('div'); kn.className = 'oy-knife'; kn.innerHTML = KNIFE; host.appendChild(kn);
+      seat.classList.add('throw'); S().play('fight', 0.35);
+      const dur = 620 / sp;
+      const anim = kn.animate([
+        { transform: `translate(${a.x}px, ${a.y}px) rotate(0deg)` },
+        { transform: `translate(${wallX}px, ${wallY}px) rotate(${t.side === 0 ? -540 : 540}deg)`, offset: 0.45 },
+        { transform: `translate(${c.x}px, ${c.y}px) rotate(${t.side === 0 ? -900 : 900}deg)` }], { duration: dur, easing: 'cubic-bezier(.3,.1,.4,1)' });
+      setTimeout(() => { sparksAt(v, wallX, wallY); S().play('tick', 0.6); }, dur * 0.45);
+      // сторона, куда падает сфера, вспыхивает
+      const glow = document.createElement('i'); glow.className = 'oy-sideglow'; glow.style.gridColumn = `${t.side * 2 + 1} / span 2`; glow.style.gridRow = '1 / 6'; v.grid.appendChild(glow);
+      await anim.finished.catch(() => {});
+      kn.remove(); seat.classList.remove('throw');
+      cell.innerHTML = orbHTML(t.v); cell.classList.remove('land'); void cell.offsetWidth; cell.classList.add('land', 'strike-in');
+      blast(v, cell, true); sparks(cell, 12, '#ffd34d'); S().play('boom', 0.45); S().vibe(25);
+      setTimeout(() => glow.remove(), 500);
+      await sleep(220 / sp);
+    }
+  }
+  function sparksAt(v, x, y) {
+    const host = v.root.querySelector('.oy-frame'), hr = host.getBoundingClientRect(), rr = v.root.getBoundingClientRect();
+    for (let k = 0; k < 8; k++) {
+      const p = document.createElement('i'); p.className = 'oy-spark';
+      const a = Math.random() * Math.PI * 2, d = 18 + Math.random() * 30;
+      p.style.cssText = `left:${x - (hr.left - rr.left)}px;top:${y - (hr.top - rr.top)}px;--x:${Math.cos(a) * d}px;--y:${Math.sin(a) * d}px`;
+      host.appendChild(p); setTimeout(() => p.remove(), 700);
+    }
+  }
+  async function sittersLeave(v) {
+    if (!v.sitrow.children.length) return;
+    [...v.sitrow.children].forEach((el, k) => { el.style.animationDelay = k * 80 + 'ms'; el.classList.add('leave'); });
+    v.msg.textContent = 'Сидельцы сделали дело и ушли';
+    await sleep(700); renderSit(v, 0);
+  }
+
   // Полная анимация результата сервера.
   async function animate(v, r, o = {}) {
     const bet = o.bet || 1, sp = o.speed || 1;
     v.acc.hidden = true; v.fs.hidden = true; v.win.textContent = ''; v.msg.textContent = 'Крутим…';
-    const b = await spinAnim(v, r.base, { speed: sp, bet });
+    if (r.sit) await sittersArrive(v, r.sit);
+    const b = await spinAnim(v, r.base, { speed: sp, bet, sit: r.sit });
     let shown = b.win;
     if (b.mult) {
       shown = b.win * b.mult;
@@ -326,6 +386,7 @@ window.Olympus = (() => {
       S().play('casino-win'); await sleep(1100 / sp);
     }
     if (r.base.scatPay) { shown += r.base.scatPay; v.win.textContent = fmt(shown * bet); }
+    if (r.sit && r.sit.left) await sittersLeave(v);
     if (r.fs) {
       // бонус
       v.root.classList.add('bonus');
@@ -379,7 +440,7 @@ window.Olympus = (() => {
       <div class="dk-note oy-note">Играем на зелёные «бабки» — их нельзя купить. Ставка+ (+25%) — бонус выпадает почти втрое чаще. Максимальный выигрыш ×25 000.</div>
     </section>`;
     const v = mount(document.getElementById('oyHost'), { glok: B.avatar({ char: 'glok' }) });
-    const BUY = 72, SUPER = 215;
+    const BUY = 68, SUPER = 197;
     const upd = () => { document.getElementById('oyBetV').innerHTML = `<i class="bucks"></i>${fmt(BETS[betI] * (ante ? 1.25 : 1))}`; document.getElementById('oyBuyV').innerHTML = `<i class="bucks"></i>${fmt(BETS[betI] * BUY)}`; };
     upd();
     document.getElementById('oyBack').onclick = () => { auto = 0; if (!busy) B.home(); else B.toast('Дождись конца спина'); };
@@ -435,14 +496,14 @@ window.Olympus = (() => {
   function paytable() {
     const B = window.BR;
     const P = [['crown', [10, 25, 50]], ['chain', [2.5, 10, 25]], ['merin', [2, 5, 15]], ['pidjak', [1.5, 2, 12]], ['konyak', [1, 1.5, 10]], ['pager', [0.8, 1.2, 8]], ['t', [0.5, 1, 5]], ['k', [0.4, 0.9, 4]], ['d', [0.25, 0.75, 2]]];
-    const k = 1.14;
+    const k = 1.064;
     B.modal(`<div class="rules oy-pay"><h2>Bratva Olympus</h2>
       <p>Поле 6×5 без линий. Выигрыш — 8 и больше одинаковых символов в любом месте. Выигравшие взрываются, сверху падают новые — каскад идёт, пока есть выигрыш.</p>
       <div class="oy-ptab"><div class="h"><span></span><b>8–9</b><b>10–11</b><b>12+</b></div>${P.map(([s, v]) => `<div><span class="pt-s">${sym(s)}</span>${v.map((x) => `<b>×${+(x * k).toFixed(2)}</b>`).join('')}</div>`).join('')}</div>
       <p><b>Сферы Глока</b> ×2…×1000 падают на поле. Если спин выиграл — все сферы складываются и умножают выигрыш.</p>
       <p><b>Удар Глока</b> — если спин выиграл, а сфер нет, Глок иногда сам бросает на поле одну-две сферы.</p>
       <p><b>Общак</b> (пачка денег) — 4 и больше в любом месте: 15 бесплатных спинов. В бонусе множитель копится на весь бонус, 3 Общака — ещё +5 спинов. За 4/5/6 Общаков сразу ×3/×5/×100.</p>
-      <p><b>Купить бонус</b> — ×72 от ставки, сразу 15 бесплатных спинов. <b>Беспредел</b> — ×215: те же 15 спинов, но в каждом гарантирована сфера Глока, а крупные сферы падают чаще. Только за бабки.</p><p>Ставка+ стоит на 25% дороже — бонус выпадает почти втрое чаще. Отдача около 95%. Максимум ×25 000.</p></div>`);
+      <p><b>Купить бонус</b> — ×68 от ставки, сразу 15 бесплатных спинов. <b>Беспредел</b> — ×197: те же 15 спинов, но в каждом гарантирована сфера Глока, а крупные сферы падают чаще. Только за бабки.</p><p>Ставка+ стоит на 25% дороже — бонус выпадает почти втрое чаще. Отдача около 95%. Максимум ×25 000.</p></div>`);
   }
   return { mount, animate, show, sym };
 })();

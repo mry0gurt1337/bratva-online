@@ -3,6 +3,9 @@
 // каскады, сферы-множители от Глока, бесплатные спины с копящимся множителем. Считается только на сервере.
 // Особенности: «Удар Глока» — если спин выиграл без сфер, Глок иногда сам бросает 1–2 сферы;
 // бонус «Беспредел» (только покупкой) — в каждом бесплатном спине гарантирована сфера.
+// Сидельцы: перед спином иногда подсаживается старый сиделец с перстнем (до 5). Каждый на каждом спине
+// бросает нож — тот рикошетит и падает на одну из трёх сторон поля, там появляется сфера-множитель.
+// Спин выиграл с множителем — сидельцы уходят. Сколько их сидит, сервер помнит для каждого игрока.
 const crypto = require('crypto');
 const COLS = 6, ROWS = 5, CELLS = COLS * ROWS, MAX_WIN = 25000;
 // выплаты в ставках за 8–9 / 10–11 / 12+ символов
@@ -22,11 +25,14 @@ const W = { crown: 2.2, chain: 3.4, merin: 4.2, pidjak: 5, konyak: 5.8, pager: 6
 // сферы: в базе и в бонусе свои таблицы — в бонусе крупные выпадают чаще
 const MULTS = [[2, 150], [3, 110], [4, 80], [5, 70], [6, 45], [8, 40], [10, 40], [12, 26], [15, 24], [20, 20], [25, 14], [50, 8], [100, 4], [250, 1.2], [500, 0.45], [1000, 0.15]];
 const MULTS_FS = MULTS.map(([v, w]) => [v, v >= 10 ? w * 1.6 : w]);
-const CFG = { k: 1.14, scatter: 0.0165, multBase: 0.0033, multFs: 0.0085, fsSpins: 15, fsRetrigger: 5, strike: 0.05, strikeTwo: 0.25, ante: 1.31 };
+// сфера сидельца: скромнее — их может сидеть пятеро и бросать каждый спин
+const MULTS_SIT = [[2, 40], [3, 30], [4, 15], [5, 10], [10, 4], [25, 1]];
+const CFG = { k: 1.064, scatter: 0.0165, multBase: 0.0033, multFs: 0.0085, fsSpins: 15, fsRetrigger: 5, strike: 0.05, strikeTwo: 0.25, ante: 1.31, sitIn: 0.03, sitMax: 5 };
 const rnd = () => crypto.randomInt(1 << 30) / (1 << 30);
 const SYMS = Object.keys(W), WSUM = SYMS.reduce((s, k) => s + W[k], 0);
 const msum = (t) => t.reduce((s, m) => s + m[1], 0), MSUM = msum(MULTS), MSUM_FS = msum(MULTS_FS);
-function orb(fs) { const t = fs ? MULTS_FS : MULTS; let y = rnd() * (fs ? MSUM_FS : MSUM); for (const [v, w] of t) { if ((y -= w) < 0) return v; } return 2; }
+const MSUM_SIT = msum(MULTS_SIT);
+function orb(fs) { const t = fs === 'sit' ? MULTS_SIT : fs ? MULTS_FS : MULTS; let y = rnd() * (fs === 'sit' ? MSUM_SIT : fs ? MSUM_FS : MSUM); for (const [v, w] of t) { if ((y -= w) < 0) return v; } return 2; }
 
 function pick(fs, ante) {
   const x = rnd();
@@ -112,14 +118,39 @@ function freeSpins(sup, already = 0) {
 
 // Полная игра: базовый спин + бонус, если выпал. Всё в ставках (x).
 // buy = купленный бонус: базовый спин гарантированно с 4+ Общаками; buy === 'super' — бонус «Беспредел»
-function play(ante = false, buy = false) {
+// Броски сидельцев: каждая сфера ложится в случайную клетку одной из трёх сторон (столбцы 0–1, 2–3, 4–5)
+function sitterThrows(base, n) {
+  const throws = [];
+  for (let k = 0; k < n; k++) {
+    const side = Math.floor(rnd() * 3), cells = [];
+    for (let c = side * 2; c < side * 2 + 2; c++) for (let r = 0; r < ROWS; r++) { const i = c * ROWS + r; if (base.end[i][0] !== 'M' && base.end[i] !== 'S') cells.push(i); }
+    if (!cells.length) continue;
+    const i = cells[Math.floor(rnd() * cells.length)], v = orb('sit');
+    base.end[i] = 'M' + v; throws.push({ i, v, side });
+  }
+  if (throws.length) {
+    base.mults = base.end.map((x, i) => (x[0] === 'M' ? { i, v: +x.slice(1) } : null)).filter(Boolean);
+    base.multSum = base.mults.reduce((a, m) => a + m.v, 0);
+  }
+  return throws;
+}
+// state — память игрока между спинами ({ sitters }); без неё (казино на поле) сидельцев нет
+function play(ante = false, buy = false, state = null) {
   const sup = buy === 'super';
   let base = spin(false, ante, 'base');
   for (let k = 0; buy && base.scat < 4 && k < 20000; k++) base = spin(false, false, 'base');
+  let sit = null;
+  if (state && !buy) {
+    const before = state.sitters || 0, arrived = before < CFG.sitMax && rnd() < CFG.sitIn ? 1 : 0, n = before + arrived;
+    const throws = n ? sitterThrows(base, n) : [];
+    const left = n > 0 && base.win > 0 && base.multSum > 0; // сделали дело — ушли
+    state.sitters = left ? 0 : n;
+    sit = { before, arrived, n, throws, left, after: state.sitters };
+  }
   let total = base.win * (base.win && base.multSum ? base.multSum : 1);
   const scatPay = SCATTER_PAY[Math.min(6, base.scat)] || 0;
   total += scatPay;
-  const res = { base: { ...base, total: +total.toFixed(2), scatPay }, fs: null };
+  const res = { base: { ...base, total: +total.toFixed(2), scatPay }, fs: null, sit };
   if (base.scat >= 4) {
     res.fs = freeSpins(sup, total);
     total += res.fs.total;
@@ -129,14 +160,15 @@ function play(ante = false, buy = false) {
   return res;
 }
 
-const BUY_PRICE = 72;    // цены подобраны прогоном: отдача покупок около 95%
-const SUPER_PRICE = 215;
+const BUY_PRICE = 68;    // цены подобраны прогоном: отдача покупок около 95%
+const SUPER_PRICE = 197;
 module.exports = { BUY_PRICE, SUPER_PRICE, play, spin, freeSpins, PAY, SCATTER_PAY, COLS, ROWS, MAX_WIN, CFG, W, MULTS };
 
 if (require.main === module) {
+  const state = { sitters: 0 }; let sitSpins = 0;
   const N = Number(process.argv[2]) || 300000, ante = process.argv[3] === 'ante', buy = process.argv[3] === 'buy' ? true : process.argv[3] === 'super' ? 'super' : false;
   let tot = 0, hits = 0, fs = 0, big = 0, max = 0, fsTot = 0;
-  for (let i = 0; i < N; i++) { const r = play(ante, buy); tot += r.x; if (r.x > 0) hits++; if (r.fs) { fs++; fsTot += r.fs.total; } if (r.x >= 100) big++; if (r.x > max) max = r.x; }
+  for (let i = 0; i < N; i++) { const r = play(ante, buy, buy ? null : state); if (r.sit && r.sit.n) sitSpins++; tot += r.x; if (r.x > 0) hits++; if (r.fs) { fs++; fsTot += r.fs.total; } if (r.x >= 100) big++; if (r.x > max) max = r.x; }
   const cost = buy === 'super' ? SUPER_PRICE : buy ? BUY_PRICE : ante ? 1.25 : 1;
-  console.log(`спинов ${N}${ante ? ' (повышенная ставка)' : ''}: отдача ${(100 * tot / N / cost).toFixed(2)}%, выигрышных ${(100 * hits / N).toFixed(1)}%, бонус раз в ${(N / Math.max(1, fs)).toFixed(0)}, средний бонус x${(fsTot / Math.max(1, fs)).toFixed(1)}, x100+ раз в ${(N / Math.max(1, big)).toFixed(0)}, максимум x${max}`);
+  console.log(`спинов ${N}${ante ? ' (повышенная ставка)' : ''}: отдача ${(100 * tot / N / cost).toFixed(2)}%, выигрышных ${(100 * hits / N).toFixed(1)}%, бонус раз в ${(N / Math.max(1, fs)).toFixed(0)}, средний бонус x${(fsTot / Math.max(1, fs)).toFixed(1)}, x100+ раз в ${(N / Math.max(1, big)).toFixed(0)}, максимум x${max}, сидельцы на ${(100 * sitSpins / N).toFixed(1)}% спинов`);
 }
