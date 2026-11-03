@@ -6,13 +6,15 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node test/simulate.js && node test/payments.js && node test/durak.js && node test/durak-rules.js"
+    "test:visual": "node test/visual.js",
+    "test": "node test/simulate.js && node test/payments.js && node test/durak.js && node test/durak-rules.js && node test/social.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "express": "^4.21.2",
+    "node-cron": "^4.2.1",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.1"

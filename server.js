@@ -41,7 +41,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
-const PUBLIC_RE = /^(index\.html|style\.css|game\.js|chase\.js|durak-ui\.js|olympus-ui\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
+const PUBLIC_RE = /^(index\.html|style\.css|game\.js|chase\.js|durak-ui\.js|olympus-ui\.js|social-ui\.js|board-fx\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
 app.get('/:f?', (req, res, next) => {
   const f = req.params.f || 'index.html';
   if (!PUBLIC_RE.test(f)) return next();
@@ -130,15 +130,23 @@ app.post('/api/olympus', wrap(async (req, res) => {
   const bet = Number((req.body || {}).bet), buy = !!(req.body || {}).buy, ante = !buy && !!(req.body || {}).ante;
   if (!OLY_BETS.includes(bet)) return res.status(400).json({ error: 'Нет такой ставки' });
   const cost = Math.round(bet * (buy ? OLY.BUY_PRICE : ante ? 1.25 : 1));
-  const left = await store.bucksAdd(a.key, -cost);
+  // Если взят долг из общака — сначала играем «бонусными» бабками (выигрыш с них тоже бонусный, до отыгрыша)
+  const bonusLeft = await store.bonusBet(a.key, cost);
+  const fromBonus = bonusLeft != null;
+  const left = fromBonus ? (await store.wallet(a.key)).bucks : await store.bucksAdd(a.key, -cost);
   if (left == null) {
-    const refill = await store.bucksRefill(a.key, G.DURAK.refillBelow, G.DURAK.refillTo);
+    const refill = await store.bucksRefill(a.key, G.DURAK.refillBelow, await social.refillTo(a.key));
     return res.status(402).json({ error: refill != null ? `Подъёмные: на счету снова ${refill} бабок` : `Не хватает бабок: нужно ${cost}`, bank: refill });
   }
   const r = OLY.play(ante, buy);
   const win = Math.round(r.x * bet);
-  const bank = win ? await store.bucksAdd(a.key, win) : left;
-  res.json({ r, bet, cost, win, bank });
+  let bank = left, bonus = fromBonus ? bonusLeft : null;
+  if (win && fromBonus) bonus = await store.bonusAdd(a.key, win);
+  else if (win) bank = await social.reward(a.key, win, win - cost);
+  // слот — игра против системы: оборот идёт в отыгрыш долга целиком
+  const wager = await social.onBet(a.key, cost, { pve: true });
+  if (wager) { bank = wager.bank; bonus = wager.bonus; }
+  res.json({ r, bet, cost, win, bank, bonus, fromBonus, wager });
 }));
 app.post('/api/buy', wrap(async (req, res) => {
   const a = who(req), id = String((req.body || {}).item || '');
@@ -1680,10 +1688,13 @@ setInterval(() => {
 }, 60000).unref();
 
 // «Дурак» — свой набор событий dk:* на том же сокете
-const durak = require('./durak.js').attach(io, { store, account, cleanName, CHARS });
+// Соцслой: чат, кореша, кланы, общак, ночное колесо — свой набор событий soc:*
+let durak = null;
+const social = require('./social.js').attach(io, { store, account, cleanName, CHARS, G, monopolyRooms: () => rooms, durakRooms: () => durak && durak.rooms });
+durak = require('./durak.js').attach(io, { store, account, cleanName, CHARS, social });
 const OLY = require('./olympus.js');
 
-store.init().then(() => server.listen(PORT, '0.0.0.0', async () => {
+store.init().then(() => store.socInit(Object.keys(G.CLANS))).then(() => server.listen(PORT, '0.0.0.0', async () => {
   const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
   if (bot.enabled) bot.setup(publicUrl, PACKS);
   const urls = lanIPs().map((ip) => `http://${ip}:${PORT}`);
@@ -1697,4 +1708,4 @@ store.init().then(() => server.listen(PORT, '0.0.0.0', async () => {
   console.log('  Остановить сервер: Ctrl + C\n');
 }));
 
-module.exports = { rooms };
+module.exports = { rooms, social };

@@ -124,6 +124,29 @@
     { id: 'theme', kind: 'theme', w: 6, label: 'Тема' },
   ];
 
+  // ---------- Кланы и общак ----------
+  // Всё в «бабках» (бесплатная валюта). Монеты, купленные за Stars, в общак не идут, в долг не даются и не выводятся.
+  const CLANS = {
+    boytsy:   { name: 'Бойцы',    chars: ['boec', 'gromila', 'sidelets'],     icon: 'fist',      color: '#ff5c6c', motto: 'Сила и живучесть',  perk: 'Подъёмные до 2 000 бабок вместо 1 500' },
+    delovye:  { name: 'Деловые',  chars: ['baryga', 'kommers', 'buhgalter'],  icon: 'briefcase', color: '#f5c542', motto: 'Деньги к деньгам',  perk: 'К каждому взносу в общак игра докидывает +10%' },
+    fartovye: { name: 'Фартовые', chars: ['shchipach', 'ekstrasens'],         icon: 'dice',      color: '#5b8cff', motto: 'Фарт и ловкость',   perk: 'Долг отыгрывается ×8 вместо ×10, лимит долга 15 000' },
+  };
+  const CLAN = {
+    maxPct: 20, defPct: 5, minGive: 100, switchDays: 3,
+    refill: { boytsy: 2000, boost: 3000 },
+    delovyeBonus: 0.1,
+    // Долг из общака: сумма «бонусная», пока не наберёшь оборот ×10 в играх против системы
+    loan: { mult: 10, multFartovye: 8, share: 0.1, cap: 10000, capFartovye: 15000, min: 500, minGames: 3, minHours: 24, pvp: 0.1, autoRepayPct: 25 },
+    boosts: {
+      podogrev:    { name: 'Подогрев',        price: 15000, text: 'Подъёмные для всех своих — до 3 000 бабок' },
+      bezkomissii: { name: 'Без комиссии',    price: 25000, text: 'В «Дураке» с выигрыша не сгорают 5%' },
+      stavka:      { name: 'Ставка на район', price: 40000, text: 'Если ночное колесо выберет клан — выплата вдвое' },
+    },
+    boostHours: 24,
+    // Колесо района в 00:00 по Москве: один клан, выплата активным (заходили за 7 дней)
+    wheel: { bonus: 300, share: 0.1, perCap: 5000, activeDays: 7 },
+  };
+
   // 6x6 кольцо: 0 — левый верхний угол, дальше по часовой
   function cellXY(id) {
     if (id <= 5) return { x: id, y: 0 };
@@ -142,7 +165,7 @@
   }
   const cellValue = (id, level) => BOARD[id].price + BOARD[id].up * level;
 
-  const api = { BOARD, GROUPS, C, COLORS, PACKS, SHOP, GIFTS, BOOST, EARN, WHEEL, ACTIONS, MAX_HAND, DURAK, cellXY, groupOf, ownsGroup, rentOf, cellValue };
+  const api = { BOARD, GROUPS, C, COLORS, PACKS, SHOP, GIFTS, BOOST, EARN, WHEEL, ACTIONS, MAX_HAND, DURAK, CLANS, CLAN, cellXY, groupOf, ownsGroup, rentOf, cellValue };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.G = api;
 })(typeof self !== 'undefined' ? self : this);

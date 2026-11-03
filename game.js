@@ -175,7 +175,7 @@ function render() {
   // игра стартовала, пока человек был в магазине/персонажах из лобби — возвращаем за стол
   if ((screen === 'shop' || screen === 'chars') && st && st.status === 'PLAYING' && render.last === 'LOBBY') { screen = null; toast('Сходка началась!'); }
   render.last = st ? st.status : null;
-  if (screen === 'shop' || screen === 'chars' || screen === 'durak' || screen === 'olympus') return; // свои экраны закрываются кнопкой «назад»
+  if (screen === 'shop' || screen === 'chars' || screen === 'durak' || screen === 'olympus' || screen === 'social') return; // свои экраны закрываются кнопкой «назад»
   const want = !st || !myId ? 'home' : st.status === 'LOBBY' ? 'lobby' : st.status === 'PLAYING' ? 'game' : 'over';
   if (want === 'game') {
     if (screen !== 'game') buildGame();
@@ -265,6 +265,7 @@ function renderHome() {
       <button data-shop="coins">${ic('cart')}<span>Магазин</span></button>
       <button id="chars">${ic('masks')}<span>Герои</span></button>
       <button id="daily" class="${dailyReady() ? 'hot' : ''}">${ic('calendar')}<span>Бонус</span>${dailyReady() ? '<i class="dot"></i>' : ''}</button>
+      <button id="socB">${ic('users')}<span>Кореша</span></button>
       <button id="top">${ic('trophy')}<span>Топ</span></button>
       <button id="rules">${ic('book')}<span>Правила</span></button>
     </nav>
@@ -288,6 +289,8 @@ function renderHome() {
   $('#olyB').onclick = () => Olympus.show();
   $('#durakB').onclick = () => { if (!myName()) return needName(() => DurakUI.show()); DurakUI.show(); };
   $('#top').onclick = () => renderTop();
+  $('#socB').onclick = () => Social.show();
+  if (window.Social) Social.badge();
   if (urlRoomState.code && !renderHome.invited) { renderHome.invited = true; setTimeout(() => playSheet('code'), 300); }
 }
 
@@ -517,6 +520,7 @@ function inviteSheet() {
     <div class="inv-qr"><img src="/api/qr?u=${encodeURIComponent(link)}" alt="QR-код"></div>
     <div class="inv-code"><small>Код сходки</small><b>${esc(st.code)}</b></div>
     <div class="inv-link">${esc(link)}</div>
+    <button class="btn big inv-friends" id="invFriends">${ic('users')}Позвать корешей</button>
     <div class="inv-btns">
       <a class="btn gold" href="${tgShare}" target="_blank" rel="noopener">${ic('telegram')}В Telegram</a>
       <button class="btn" id="invCopy">${ic('copy')}Ссылка</button>
@@ -524,6 +528,7 @@ function inviteSheet() {
     </div>
   </div>`);
   $('#invCopy', m).onclick = () => copyText(link);
+  $('#invFriends', m).onclick = () => { m.closeModal(); Social.invitePicker(); };
   if ($('#invShare', m)) $('#invShare', m).onclick = () => navigator.share({ title: 'Братва', text: `Заходи на сходку ${st.code}`, url: link }).catch(() => {});
 }
 function emptySeatSheet() {
@@ -627,6 +632,8 @@ function buildGame() {
   sheetKey = '';
   updSound();
   setConn(socket.connected);
+  // живой слой поля: свет, дым, голуби, сочность событий
+  if (window.BFX) BFX.attach($('#board'), () => st);
 }
 
 function updSound() { const b = $('#snd'); if (b) b.innerHTML = ic(SFX.on ? 'sound' : 'mute'); }
@@ -680,8 +687,10 @@ function updateGame() {
   if (st.dice && st.dice.seq !== seen.dice) { seen.dice = st.dice.seq; rollDice(st.dice.a, st.dice.b); }
   else if (!$('#d1').dataset.v) { setDie($('#d1'), st.dice ? st.dice.a : 5); setDie($('#d2'), st.dice ? st.dice.b : 2); }
 
+  let moveMs = 0;
   if (st.lastMove && st.lastMove.seq !== seen.move) {
     seen.move = st.lastMove.seq;
+    moveMs = (st.lastMove.delay || 0) + st.lastMove.steps * C.HOP_MS + 150;
     hop(st.lastMove.pid, st.lastMove.from, st.lastMove.steps, st.lastMove.delay || 0);
   }
   st.players.forEach((p) => { if (!animating[p.id]) disp[p.id] = p.pos; });
@@ -705,6 +714,7 @@ function updateGame() {
     </div>`;
   }).join('');
   st.players.forEach((p) => { prevMoney[p.id] = p.money; });
+  if (window.BFX) BFX.update(st, moveMs);
   if (updateGame.np !== st.players.length) { updateGame.np = st.players.length; requestAnimationFrame(fitBoard); }
   const turnCard = $('.pc.turn'), pl = $('#players');
   if (turnCard && pl.scrollWidth > pl.clientWidth) pl.scrollTo({ left: turnCard.offsetLeft - 8, behavior: 'smooth' });
@@ -892,6 +902,7 @@ function sirenLights(ms) {
   document.body.appendChild(el); setTimeout(() => el.remove(), ms);
 }
 function explodeAt(el) {
+  if (window.BFX && el && el.dataset.cell != null) { BFX.fire('boom', { cell: Number(el.dataset.cell) }); return; }
   const r = el ? el.getBoundingClientRect() : { left: innerWidth / 2 - 30, top: innerHeight / 2 - 30, width: 60, height: 60 };
   const b = document.createElement('div'); b.className = 'boom';
   b.style.left = r.left + r.width / 2 + 'px'; b.style.top = r.top + r.height / 2 + 'px';
@@ -1229,6 +1240,7 @@ function hop(pid, from, steps, delay) {
       i++;
       disp[pid] = (from + i) % C.N;
       drawTokens(pid);
+      if (window.BFX) BFX.step(disp[pid]);
       SFX.play('hop', 0.7);
       if (i < steps) setTimeout(step, C.HOP_MS);
       else { animating[pid] = false; const p = byId(pid); if (p) disp[pid] = p.pos; setTimeout(drawTokens, 120); }
@@ -1341,7 +1353,7 @@ function showFx(fx) {
     let n = 0;
     const iv = setInterval(() => {
       $$('.fx-pw', ov).forEach((e) => { e.textContent = n < 10 ? 1 + Math.floor(Math.random() * 12) : e.dataset.final; });
-      if (++n > 10) { clearInterval(iv); ov.classList.add('done'); SFX.play(fx.win ? 'strelka-win' : 'strelka-lose'); shake(fx.win ? 'shake-big' : 'shake'); }
+      if (++n > 10) { clearInterval(iv); ov.classList.add('done'); SFX.play(fx.win ? 'strelka-win' : 'strelka-lose'); shake(fx.win ? 'shake-big' : 'shake'); if (window.BFX) BFX.fire('strelka', { cell: fx.cell, win: fx.win, delay: 2600 }); }
     }, 70);
   } else if (fx.type === 'card') {
     SFX.play('card');
@@ -1363,6 +1375,7 @@ function showFx(fx) {
     closeGlokTask();
     overlay(glokCard(`${fx.line ? `<div class="glok-line">«${esc(fx.line)}»</div>` : ''}<div class="glok-title">${esc(fx.title)}</div><div class="glok-text">${esc(fx.text)}</div>`), fx.result ? 2600 : 3200);
     if (!fx.result) flash('ГЛОК ПРИШЁЛ', 'glok');
+    if (window.BFX) BFX.fire('glok', { pid: fx.pid || (curP() && curP().id), delay: fx.result ? 0 : 3400 });
   } else if (fx.type === 'pot') {
     const p = byId(fx.pid);
     SFX.play('casino-win');
@@ -1884,10 +1897,12 @@ Promise.race([assetsReady, new Promise((r) => setTimeout(r, 1200))]).then(() => 
 if (/[?&]fxdebug\b/.test(location.search)) window.__dbg = { showFx: (x) => showFx(x), setSt: (x) => { st = x; }, crowd: () => updateCrowd(), setMe: (id) => { myId = id; } };
 window.BR = {
   api, coinBurst, socket, LS, ident, ic, esc, avatar, toast, modal, flash, copyText, SFX: window.SFX,
-  wallet: () => wallet, profile: () => profile, myName,
+  wallet: () => wallet, profile: () => profile, myName, needName,
   setScreen: (x) => { screen = x; closeSheet(); $$('.modal').forEach((m) => m.remove()); },
   home: () => { screen = null; render(); },
 };
+// соцслой: чат, кореша, клан — подключаемся, как только известно погоняло
+if (window.Social) Social.init();
 // приглашение за стол «Дурака» по ссылке
 { const dk = new URLSearchParams(location.search).get('durak'); if (dk) setTimeout(() => { if (!myName()) return needName(() => { DurakUI.show(); socket.emit('dk:join', { ...ident(), code: dk, name: myName(), char: profile.char }); }); DurakUI.show(); socket.emit('dk:join', { ...ident(), code: dk, name: myName(), char: profile.char }); }, 900); }
 })();

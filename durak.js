@@ -14,7 +14,7 @@ const SUITS = ['s', 'h', 'd', 'c'];
 const QUICK = ['Красава', 'Ха-ха', 'Бито', 'Ну ты жук', 'Шулер!', 'Беру', 'Везёт же', 'Мир'];
 const COLORS = G.COLORS;
 
-function attach(io, { store, account, cleanName, CHARS }) {
+function attach(io, { store, account, cleanName, CHARS, social }) {
   const rooms = new Map();
   const tokens = new Map(); // token -> { code, id }
 
@@ -238,16 +238,23 @@ function attach(io, { store, account, cleanName, CHARS }) {
     const winners = r.players.filter((p) => !losers.includes(p));
     const lostPot = losers.reduce((s, p) => s + (p.bot && !p.left ? r.stake * 0.5 : r.stake), 0);
     const share = winners.length ? Math.floor((lostPot * (1 - D.fee)) / winners.length) : 0;
+    const shareNoFee = winners.length ? Math.floor(lostPot / winners.length) : 0;
+    const humans = r.players.filter((x) => !x.bot).length;
     const res = [];
     for (const p of r.players) {
       const win = winners.includes(p);
       let delta = win ? share : -r.stake;
       if (!p.bot && p.account && p.paid && !p.left) {
-        const back = win ? r.stake + share : 0;
-        if (back) p.bank = await store.bucksAdd(p.account.key, back);
+        // буст клана «Без комиссии» — с выигрыша не сгорают 5%
+        const my = win && social && await social.noFee(p.account.key) ? shareNoFee : share;
+        if (win) delta = my;
+        const back = win ? r.stake + my : 0;
+        // выигрыш — через общак клана (автоотчисление с чистого выигрыша)
+        if (back) p.bank = social ? await social.reward(p.account.key, back, my) : await store.bucksAdd(p.account.key, back);
+        // оборот для отыгрыша долга: стол только с ботами — как игра против системы, с людьми — ×0.1
+        if (social) social.onBet(p.account.key, r.stake, { pve: humans === 1 }).then((w) => { if (w) p.bank = w.bank; }).catch(() => {});
         // монеты за место — платит игра
         if (win) {
-          const humans = r.players.filter((x) => !x.bot).length;
           const amt = Math.round((p.place === 1 ? D.coins.first : D.coins.rest) * (humans > 1 ? 1 : 0.5));
           store.credit(p.account.key, amt, 'game', G.EARN.dayCap).then((n) => { if (n && p.socketId) io.to(p.socketId).emit('earned', { amount: n, place: p.place }); }).catch(() => {});
         }
@@ -258,7 +265,7 @@ function attach(io, { store, account, cleanName, CHARS }) {
     // чаевые дилеру — платит игра
     if (r.dealer && r.dealer.key) {
       const tip = Math.round(r.stake * D.tiers[r.tier].tip);
-      store.bucksAdd(r.dealer.key, tip).then((b) => { r.dealer.bank = b; if (r.dealer.socketId) io.to(r.dealer.socketId).emit('dk:tip', { amount: tip }); sync(r); }).catch(() => {});
+      (social ? social.reward(r.dealer.key, tip, tip) : store.bucksAdd(r.dealer.key, tip)).then((b) => { r.dealer.bank = b; if (r.dealer.socketId) io.to(r.dealer.socketId).emit('dk:tip', { amount: tip }); sync(r); }).catch(() => {});
     }
     r.results = res.sort((a, b) => (a.place || 99) - (b.place || 99));
     r.players = r.players.filter((p) => !p.left);
@@ -364,7 +371,7 @@ function attach(io, { store, account, cleanName, CHARS }) {
     on('dk:lobby', async (d) => {
       const acc = account(d);
       let bank = null;
-      if (acc) { const refill = await store.bucksRefill(acc.key, D.refillBelow, D.refillTo); bank = refill != null ? refill : (await store.wallet(acc.key)).bucks; if (refill != null) socket.emit('dk:refill', { bank }); }
+      if (acc) { const refill = await store.bucksRefill(acc.key, D.refillBelow, social ? await social.refillTo(acc.key) : D.refillTo); bank = refill != null ? refill : (await store.wallet(acc.key)).bucks; if (refill != null) socket.emit('dk:refill', { bank }); }
       socket.emit('dk:lobby', { tables: lobbyList(), bank });
     });
     on('dk:create', async (d) => {

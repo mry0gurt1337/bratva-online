@@ -231,13 +231,14 @@ window.DurakUI = (() => {
   function bindLobbyPanel() {
     if ($('#dkBot')) $('#dkBot').onclick = () => B.socket.emit('dk:bot');
     if ($('#dkStart')) $('#dkStart').onclick = () => B.socket.emit('dk:start');
-    if ($('#dkInv')) $('#dkInv').onclick = () => {
+    if ($('#dkInv')) $('#dkInv').onclick = () => window.Social ? Social.invitePicker(byLink) : byLink();
+    function byLink() {
       const url = `${location.origin}/?durak=${st.code}`;
       const text = `Садись за стол в «Дурака» в Братве — код ${st.code}`;
       if (window.Telegram && Telegram.WebApp && Telegram.WebApp.openTelegramLink) Telegram.WebApp.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(url)}&text=${encodeURIComponent(text)}`);
       else if (navigator.share) navigator.share({ title: 'Дурак', text, url }).catch(() => {});
       else B.copyText(url);
-    };
+    }
   }
   function tick() {
     cancelAnimationFrame(timerRaf);
