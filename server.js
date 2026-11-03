@@ -516,7 +516,7 @@ function casinoPlay(r, p, q, choice) {
     const deck = shuffle(RANKS.flatMap(([rk]) => SUITS.map((st) => ({ r: rk, s: st }))));
     const hand = [deck.pop(), deck.pop()], dealer = [deck.pop(), deck.pop()];
     r._ochko = { deck, dealer };
-    log(r, `🃏 ${p.name} сел играть в очко на $${bet}`, 'info', { pid: p.id });
+    log(r, `${p.name} сел играть в очко на $${bet}`, 'info', { pid: p.id });
     if (golden(hand) || handSum(hand) === 21) { r.pending = { type: 'OCHKO', bet, hand, dealer: [dealer[0]] }; return ochkoFinish(r, p, r.pending); }
     ask(r, { type: 'OCHKO', bet, hand, sum: handSum(hand), dealer: has(p, 'shuler') ? dealer : [dealer[0]], peek: has(p, 'shuler') });
     return 'ochko';
@@ -543,7 +543,7 @@ function ochkoFinish(r, p, q) {
   else if (me > 21) { result = 'bust'; casinoLose(r, p, q.bet, `перебор ${me}`); }
   else if (me === 21 && q.hand.length === 2) { result = 'natural'; won = casinoWin(r, p, Math.round(q.bet * 1.5), 'очко с раздачи', {}); }
   else if (d > 21 || me > d) { result = 'win'; won = casinoWin(r, p, q.bet, `очко ${me} против ${d}`, {}); }
-  else if (me === d) { result = 'push'; log(r, `🃏 ${p.name}: ничья в очко, ${me} на ${d} — ставка вернулась`, 'info', { pid: p.id }); }
+  else if (me === d) { result = 'push'; log(r, `${p.name}: ничья в очко, ${me} на ${d} — ставка вернулась`, 'info', { pid: p.id }); }
   else { result = 'lose'; casinoLose(r, p, q.bet, `очко ${me} против ${d} у крупье`); }
   r._ochko = null;
   r.fx = { type: 'ochko', pid: p.id, bet: q.bet, hand: q.hand, dealer: o.dealer, me, d, result, won, seq: ++r.fxSeq };
@@ -1026,7 +1026,7 @@ function startGame(r) {
     sealed: null, glokTask: null, glokCont: null, turnsSinceGlok: 0, offers: [],
   });
   r.players.filter((p) => p.boosted).forEach((p) => log(r, `${p.name} взял подъёмные: старт $${p.money}`, 'buy', { pid: p.id }));
-  log(r, `Замес начался! Первым ходит ${r.players[0].name}`, 'start');
+  log(r, `Сходка началась! Первым ходит ${r.players[0].name}`, 'start');
   startTurn(r);
 }
 
@@ -1232,7 +1232,7 @@ io.on('connection', (socket) => {
     const r = me.r;
     r.status = 'LOBBY'; r.phase = null; r.props = {}; r.winner = null; r.standings = null; r.titles = null;
     r.players.forEach((p) => Object.assign(p, freshStats()));
-    log(r, 'Новая сходка — ждём замес', 'start');
+    log(r, 'Новая сходка — ждём братву', 'start');
     sync(r);
   });
 

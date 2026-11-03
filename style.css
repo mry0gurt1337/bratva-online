@@ -983,3 +983,119 @@ b.neg { color: #ff7d8a !important; } b.pos { color: var(--green) !important; }
 .inv-btns { display: flex; gap: 8px; width: 100%; } .inv-btns > * { flex: 1; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; padding: 13px 8px; font-size: 13px; }
 @media (max-height: 700px) { .seat { padding: 9px 5px 7px; } .seat-av { width: 46px; height: 46px; } .seat.empty { min-height: 104px; } .lb-me-pic { width: 44px; height: 44px; } }
 @media (min-width: 640px) { .seats { grid-template-columns: repeat(3, 1fr); gap: 10px; } .seat-av { width: 72px; height: 72px; } }
+
+/* ===================== 3D-арт: рамки, подарки, магазин, герой ===================== */
+/* Рамки аватарки — картинка-кольцо поверх аватара, чуть выходит за края */
+.frame-gold, .frame-neon, .frame-wire, .frame-fire { --fs: 36%; position: relative; overflow: visible !important; box-shadow: none !important; outline: none !important; animation: none !important; background: none !important; }
+.frame-gold > img, .frame-gold > svg, .frame-neon > img, .frame-neon > svg,
+.frame-wire > img, .frame-wire > svg, .frame-fire > img, .frame-fire > svg { clip-path: circle(50%); border-radius: 50%; box-shadow: none !important; }
+.frame-gold::after, .frame-neon::after, .frame-wire::after, .frame-fire::after {
+  content: ''; position: absolute; inset: calc(var(--fs) * -1); z-index: 2; pointer-events: none;
+  background: center / contain no-repeat; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+.frame-gold::after { background-image: url(art-frame-gold.webp); }
+.frame-neon { --fs: 30%; } .frame-neon::after { background-image: url(art-frame-neon.webp); animation: neonGlow 1.8s ease-in-out infinite alternate; }
+.frame-wire { --fs: 40%; } .frame-wire::after { background-image: url(art-frame-wire.webp); }
+.frame-fire { --fs: 42%; } .frame-fire::after { background-image: url(art-frame-fire.webp); animation: fireFlick .9s ease-in-out infinite alternate; }
+@keyframes neonGlow { to { filter: drop-shadow(0 0 6px rgba(255,61,242,.7)) brightness(1.2); } }
+@keyframes fireFlick { 50% { transform: scale(1.03) rotate(2deg); filter: brightness(1.15); } to { transform: scale(.99) rotate(-1deg); } }
+/* в плотных местах рамка тоньше */
+.pc .frame-gold, .pc .frame-neon, .pc .frame-wire, .pc .frame-fire,
+.tr-p .frame-gold, .tr-p .frame-neon, .tr-p .frame-wire, .tr-p .frame-fire { --fs: 24%; }
+.win-pic.frame-gold > img, .win-pic.frame-neon > img, .win-pic.frame-wire > img, .win-pic.frame-fire > img,
+.win-pic.frame-gold > svg, .win-pic.frame-neon > svg, .win-pic.frame-wire > svg, .win-pic.frame-fire > svg { box-shadow: none !important; }
+.win-pic .crown { z-index: 3; }
+.shop-item .pl-pic.big { margin: 18px 0 10px; }
+
+/* Подарки и предметы — объёмные картинки */
+.gift-img { object-fit: contain; display: inline-block; vertical-align: middle; filter: drop-shadow(0 6px 10px rgba(0,0,0,.55)); }
+img.gift-ic { width: 40px; height: 40px; }
+img.gift-big { width: 84px; height: 84px; }
+img.gift-fly-ic { width: 64px; height: 64px; filter: drop-shadow(0 0 14px rgba(245,197,66,.7)); }
+.gift-opt img.gift-ic { width: 46px; height: 46px; margin-bottom: 2px; }
+.si-img { width: 100%; max-width: 128px; height: 96px; object-fit: contain; filter: drop-shadow(0 10px 16px rgba(0,0,0,.6)); }
+.si-prev .art-medal { filter: drop-shadow(0 10px 16px rgba(0,0,0,.6)); }
+
+/* Пакеты монет */
+.pack { padding: 12px 6px 10px; gap: 2px; background: radial-gradient(ellipse at 50% 35%, #3b2e10, #17120a 62%, #0e0b07); }
+.pack-pile { min-height: 0; height: 78px; width: 100%; align-items: center; }
+.pack-img { height: 100%; width: 100%; object-fit: contain; filter: drop-shadow(0 8px 12px rgba(0,0,0,.7)); }
+.pack[data-pack="p100"] .pack-img { height: 74%; }
+.pack-name { font-style: normal; font-family: var(--display); font-size: 15px; letter-spacing: .03em; margin-top: 4px;
+  background: linear-gradient(180deg, #fff1a8, #fcd34d 40%, #ca8a04); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 1px 0 rgba(60,36,4,.9)); }
+.pack b { display: inline-flex; align-items: center; gap: 3px; font-size: 17px; color: #fff3cf; }
+.pack b .ic.coin { width: 16px; height: 16px; }
+
+/* Мягкое золотое свечение карточек при наведении/нажатии */
+.shop-item, .pack, .char { transition: transform .3s ease, box-shadow .3s ease, border-color .3s ease; }
+@media (hover: hover) {
+  .shop-item:hover, .pack:hover, .char:not(.locked):hover { transform: scale(1.05); box-shadow: 0 0 20px rgba(255,215,0,.4); border-color: #8a6a1c; z-index: 1; }
+}
+.pack:active, .shop-item:active { box-shadow: 0 0 20px rgba(255,215,0,.4); }
+
+/* Главный экран: тёмная объёмная подложка за персонажем */
+.hero-stage::before { content: ''; position: absolute; left: 50%; top: 50%; width: 112%; height: 100%; transform: translate(-50%, -50%);
+  background: radial-gradient(ellipse at center, rgba(63,63,70,.75) 0%, rgba(39,39,42,.45) 38%, transparent 70%); border-radius: 50%; pointer-events: none; }
+.seat .frame-gold, .seat .frame-neon, .seat .frame-wire, .seat .frame-fire { --fs: 19%; margin: 9px auto 11px; }
+.prof-av.frame-gold, .prof-av.frame-neon, .prof-av.frame-wire, .prof-av.frame-fire { --fs: 22%; }
+
+/* ===================== Единый стиль ===================== */
+:root { --card-bg: linear-gradient(180deg, #1c1924, #121017); --card-bd: #2e2939; --card-r: 16px; --card-on: #c99a2e; }
+/* Все карточки — одна подложка, одна рамка, один радиус */
+.char, .char-tile, .shop-item, .pack, .gift-opt, .code-card, .free-coins, .lb-me, .lb-rules, .lb-wait, .cs-games button, .title-card {
+  background: var(--card-bg); border: 1px solid var(--card-bd); border-radius: var(--card-r); box-shadow: 0 10px 22px -14px #000; }
+.seat, .seat.empty { border-radius: var(--card-r); }
+.pack { background: radial-gradient(ellipse at 50% 30%, rgba(201,154,46,.16), transparent 65%), var(--card-bg); }
+/* Выбранное — везде одинаково: золотая рамка */
+.char.on, .char-tile.on, .shop-item.on, .gift-opt.on { border-color: var(--card-on); background: radial-gradient(ellipse at 50% 0%, rgba(245,197,66,.14), transparent 70%), var(--card-bg); box-shadow: 0 0 0 1px var(--card-on) inset, 0 10px 24px -12px rgba(245,197,66,.55); }
+/* Подпись персонажа — одинаковая везде */
+.cap { display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; min-width: 0; }
+.cap .cap-name { display: block; font-family: var(--display); font-weight: 400; font-size: 14px; line-height: 1.1; letter-spacing: .03em; color: #ffe7a8; text-shadow: 0 1px 0 #2a1a04; }
+.cap .cap-perk { display: block; font-family: Manrope, system-ui, sans-serif; font-weight: 600; font-size: 11.5px; line-height: 1.3; color: #a9a1b8; margin: 0; min-height: 0; }
+.hero-info .cap .cap-name { font-size: 22px; letter-spacing: .04em; text-shadow: 0 2px 0 #3a2404, 0 0 18px rgba(245,197,66,.35); }
+.hero-info .cap .cap-perk { font-size: 13px; color: #cfc4b0; }
+.lb-me-txt .cap { align-items: flex-start; text-align: left; }
+.lb-me-txt .cap .cap-name { font-size: 15px; }
+.char-tile .cap { min-height: 46px; }
+/* Медальоны везде одинаково «стоят» */
+.art-medal { filter: drop-shadow(0 8px 12px rgba(0,0,0,.55)); }
+.seat .seat-char, .who small, .tr-p small { font-family: var(--display); font-weight: 400; font-size: 12px; letter-spacing: .03em; color: #e9d29a; }
+
+/* ===================== Нижнее меню: строгая сетка ===================== */
+.dock { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; padding: 10px 8px; align-items: stretch;
+  background: rgba(9,9,11,.9); border: 0; border-top: 1px solid #27272a; border-radius: 20px 20px 0 0;
+  box-shadow: 0 -12px 30px rgba(0,0,0,.45); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.dock button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; width: 100%; height: 100%;
+  min-width: 0; margin: 0; padding: 6px 0; border-radius: 12px; color: #a1a1aa; }
+.dock button .ic { width: 24px; height: 24px; flex-shrink: 0; margin: 0 0 6px; color: #a1a1aa; object-fit: contain; animation: none; }
+.dock button span { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
+  font-family: Manrope, system-ui, sans-serif; font-size: 10px; font-weight: 500; line-height: 1.2; letter-spacing: .05em; text-transform: uppercase; color: #a1a1aa; }
+.dock button:active, .dock button.on { background: rgba(234,179,8,.08); }
+.dock button:active .ic, .dock button:active span, .dock button.on .ic, .dock button.on span { color: #eab308; }
+.dock .hot .ic { color: #eab308; animation: none; }
+.dock .dot { top: 4px; right: calc(50% - 17px); width: 8px; height: 8px; box-shadow: 0 0 0 2px #09090b; }
+
+/* ===================== Главные кнопки: благородное золото без кислотного свечения ===================== */
+.btn-play { background: linear-gradient(90deg, #ca8a04, #eab308); color: #18181b; border: 1px solid rgba(255,236,170,.35);
+  box-shadow: 0 0 15px rgba(202,138,4,.4), inset 0 1px 0 rgba(255,255,255,.35), inset 0 -2px 0 rgba(90,55,0,.35);
+  text-shadow: 0 1px 0 rgba(255,240,190,.45); animation: none; transition: background .2s, transform .1s; }
+.btn-play:hover { background: linear-gradient(90deg, #eab308, #facc15); }
+.btn-play .shine { background: linear-gradient(100deg, transparent, rgba(255,255,255,.35), transparent); }
+.menu-cta { filter: none; }
+
+/* ===================== Типографика карточек: один стандарт ===================== */
+.cap .cap-name, .si-name b, .gift-opt b, .shop-item .si-name b { font-family: Manrope, system-ui, sans-serif; font-weight: 700; font-size: 14px; line-height: 1.2; letter-spacing: 0; color: #f4f4f5; text-shadow: none; }
+.cap .cap-perk, .si-name small, .shop-item small { font-family: Manrope, system-ui, sans-serif; font-weight: 500; font-size: 12px; line-height: 1.35; color: #a1a1aa; }
+/* премиум — золотой градиент */
+.cap.premium .cap-name, .pack .pack-name { background: linear-gradient(180deg, #fde68a, #eab308 55%, #a16207); -webkit-background-clip: text; background-clip: text; color: transparent; filter: none; }
+.pack .pack-name { font-family: Manrope, system-ui, sans-serif; font-weight: 800; font-size: 14px; letter-spacing: .02em; }
+.cap { gap: 2px; }
+.char-tile .cap { min-height: 0; }
+.hero-info .cap .cap-name { font-family: var(--display); font-weight: 400; font-size: 22px; color: #ffe7a8; }
+.hero-info .cap.premium .cap-name { color: transparent; }
+.hero-info .cap .cap-perk { font-size: 13px; color: #d4d4d8; }
+.seat .seat-char, .who small, .tr-p small { font-family: Manrope, system-ui, sans-serif; font-weight: 500; font-size: 12px; letter-spacing: 0; color: #a1a1aa; }
+.gift-opt b { font-size: 12px; } .gift-opt small { font-size: 12px; }
+/* 3D-здания в окнах решений, сделках и карточках точек */
+img.cell-art { width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 6px 10px rgba(0,0,0,.6)); }
+.sh-em:has(img.cell-art), .of-em:has(img.cell-art) { background: radial-gradient(circle at 50% 60%, color-mix(in srgb, var(--g, #c99a2e) 22%, #120f18), #0e0c13 75%); padding: 3px; }

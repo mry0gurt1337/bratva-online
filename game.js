@@ -13,8 +13,14 @@ const app = $('#app');
 const QUICK = ['Красава', 'Ха-ха', 'Плати давай', 'Жара пошла', 'Мир', 'Ну ты жук', 'Стрелка?', 'Везёт же', 'Дима, нет!'];
 const ic = (n, cls) => window.IC.ic(n, cls);
 const COIN = ic('coin', 'coin');
-const cellIc = (c) => ic('c-' + c.slug, 'cell-ic');
-const giftIc = (g, cls) => ic('g-' + g.id, cls || 'gift-ic');
+const cellIc = (c) => {
+  const a = assetFor('cell-' + c.slug);
+  return a ? `<img src="${a}" alt="" class="cell-ic cell-art">` : ic('c-' + c.slug, 'cell-ic');
+};
+const giftIc = (g, cls) => {
+  const a = assetFor('gift-' + g.id);
+  return a ? `<img src="${a}" alt="" class="gift-img ${cls || 'gift-ic'}">` : ic('g-' + g.id, cls || 'gift-ic');
+};
 const stars = (n) => (n ? `<span class="stars">${ic('star').repeat(n)}</span>` : '');
 const placeBadge = (i) => `<span class="place p${i + 1}">${i + 1}</span>`;
 const CHAR_KEYS = Object.keys(CHARS);
@@ -159,7 +165,7 @@ const curP = () => st && st.players[st.turn];
 
 function render() {
   // игра стартовала, пока человек был в магазине/персонажах из лобби — возвращаем за стол
-  if ((screen === 'shop' || screen === 'chars') && st && st.status === 'PLAYING' && render.last === 'LOBBY') { screen = null; toast('Замес начался!'); }
+  if ((screen === 'shop' || screen === 'chars') && st && st.status === 'PLAYING' && render.last === 'LOBBY') { screen = null; toast('Сходка началась!'); }
   render.last = st ? st.status : null;
   if (screen === 'shop' || screen === 'chars') return; // свои экраны закрываются кнопкой «назад»
   const want = !st || !myId ? 'home' : st.status === 'LOBBY' ? 'lobby' : st.status === 'PLAYING' ? 'game' : 'over';
@@ -184,11 +190,14 @@ function render() {
   else renderOver();
 }
 
+// Единая подпись персонажа — одинаковая везде: имя + способность
+const charCap = (k) => `<span class="cap${PREMIUM[k] ? ' premium' : ''}"><b class="cap-name">${CHARS[k].name}</b><small class="cap-perk">${CHARS[k].perk}</small></span>`;
+
 // ---------- Главный экран ----------
 function charCard(k, on) {
   const c = CHARS[k], open = charOpen(k);
   return `<button class="char ${on ? 'on' : ''} ${open ? '' : 'locked'}" data-char="${k}" aria-label="${c.name}">
-    <span class="char-pic">${medal(k)}</span>${ASSETS.has('art-char-' + k + '.webp') ? '' : `<b>${c.name}</b>`}<small>${c.perk}</small>
+    <span class="char-pic">${medal(k)}</span>${charCap(k)}
     ${open ? '' : `<span class="lock">${ic('lock')}${PREMIUM[k].price}${COIN}</span>`}</button>`;
 }
 function pickChar(b, after) {
@@ -237,13 +246,13 @@ function renderHome() {
       </div>
       <button class="hero-arrow next" data-dir="1" aria-label="Следующий">${ic('back')}</button>
     </div>
-    <div class="hero-info"><b>${ch.name}</b><span>${ch.perk}</span></div>
+    <div class="hero-info">${charCap(profile.char)}</div>
     <div class="menu-cta">
       <button class="btn-play" id="play"><span>Играть</span><i class="shine"></i></button>
     </div>
     <nav class="dock">
       <button data-shop="coins">${ic('cart')}<span>Магазин</span></button>
-      <button id="chars">${ic('masks')}<span>Персонажи</span></button>
+      <button id="chars">${ic('masks')}<span>Герои</span></button>
       <button id="daily" class="${dailyReady() ? 'hot' : ''}">${ic('calendar')}<span>Бонус</span>${dailyReady() ? '<i class="dot"></i>' : ''}</button>
       <button id="top">${ic('trophy')}<span>Топ</span></button>
       <button id="rules">${ic('book')}<span>Правила</span></button>
@@ -369,7 +378,7 @@ function renderChars(from) {
       const c = CHARS[k], open = charOpen(k), on = profile.char === k;
       return `<button class="char-tile ${on ? 'on' : ''} ${open ? '' : 'locked'}" data-k="${k}">
         <span class="ct-pic">${medal(k)}</span>
-        <b>${c.name}</b><small>${c.perk}</small>
+        ${charCap(k)}
         <span class="ct-state">${on ? `${ic('check')}Выбран` : open ? 'Выбрать' : `${ic('lock')}${PREMIUM[k].price}${COIN}`}</span>
       </button>`;
     }).join('')}</div>
@@ -460,7 +469,7 @@ function renderLobby() {
     <div class="lb-panel">
       ${mine ? `<div class="lb-me">
         <span class="lb-me-pic">${medal(mine.char)}</span>
-        <div class="lb-me-txt"><b>${CHARS[mine.char].name}</b><small>${CHARS[mine.char].perk}</small></div>
+        <div class="lb-me-txt">${charCap(mine.char)}</div>
         <button class="btn small" id="chgChar">${ic('masks')}Сменить</button>
       </div>` : ''}
       ${mine && set.boosts ? `<button class="boost-toggle ${mine.boost ? 'on' : ''}" id="boostT"><span class="bt-ic">${ic('briefcase')}</span><span><b>Подъёмные +${BOOST.pct}%</b><small>Старт $${Math.round(C.START_MONEY * (1 + BOOST.pct / 100))} · ${BOOST.price} монет при старте · у тебя ${wallet ? wallet.coins : '…'}</small></span><i></i></button>` : ''}
@@ -472,7 +481,7 @@ function renderLobby() {
       </button>
     </div>
     <footer class="lb-bar">
-      ${host ? `<button class="btn-play small-play" id="start" ${st.players.length < 2 ? 'disabled' : ''}><span>${st.players.length < 2 ? 'Ждём братву' : 'Начать замес'}</span><i class="shine"></i></button>`
+      ${host ? `<button class="btn-play small-play" id="start" ${st.players.length < 2 ? 'disabled' : ''}><span>${st.players.length < 2 ? 'Ждём братву' : 'В дело'}</span><i class="shine"></i></button>`
         : '<div class="lb-wait"><span class="dots"><i></i><i></i><i></i></span>Ждём, когда босс начнёт</div>'}
     </footer>
   </section>`;
@@ -1114,7 +1123,7 @@ function openSheet(q) {
     case 'CASINO':
       return openCasino(q);
     case 'OCHKO':
-      html = head('🃏', 'Очко', `Ставка $${q.bet} · ${q.peek ? 'Шулер видит карту крупье' : 'крупье добирает до 17'}`, '#c0283a') +
+      html = head(ic('cards'), 'Очко', `Ставка $${q.bet} · ${q.peek ? 'Шулер видит карту крупье' : 'крупье добирает до 17'}`, '#c0283a') +
         `<div class="ochko">
           <div class="oc-row"><span class="oc-lbl">Крупье</span><div class="cards">${q.dealer.map(cardHTML).join('')}${q.peek ? '' : '<div class="pcard back"></div>'}</div></div>
           <div class="oc-row"><span class="oc-lbl">Ты · <b>${q.sum}</b></span><div class="cards">${q.hand.map(cardHTML).join('')}</div></div>
@@ -1291,8 +1300,8 @@ function renderShop(tab, focus) {
     body = `<div class="packs">${PACKS.map((p, i) => `
       <button class="pack" data-pack="${p.id}">
         ${p.tag ? `<span class="pack-tag">${p.tag}</span>` : ''}
-        <span class="pack-pile">${COIN.repeat(i + 1)}</span>
-        <b>${p.coins}</b><small>${p.label}</small>
+        <span class="pack-pile">${assetFor('pack-' + p.id) ? `<img src="${assetFor('pack-' + p.id)}" alt="" class="pack-img">` : COIN.repeat(i + 1)}</span>
+        <i class="pack-name">${p.label}</i><b>${p.coins}${COIN}</b>
         <span class="pack-price">${ic('tgstar')}${p.stars}</span>
       </button>`).join('')}</div>
       <div class="hint center-t">${starsOk ? 'Оплата через Telegram Stars — прямо в Telegram, без карт.' : config.tg ? 'Чтобы купить монеты, войди через Telegram на главном экране или открой игру в боте.' : 'Покупка монет заработает, когда подключат бота (см. README).'}</div>
@@ -1303,13 +1312,13 @@ function renderShop(tab, focus) {
         <button class="btn small gold" id="daily2" ${!wallet || wallet.daily_on === todayStr() ? 'disabled' : ''}>${!wallet || wallet.daily_on === todayStr() ? 'Бонус уже забран — приходи завтра' : 'Забрать бонус дня'}</button>
       </div>`;
   } else if (shopTab === 'chars') {
-    body = `<div class="shop-grid chars-grid">${list('char').map(([id, v]) => item(id, v, medal(v.char), `<b>${CHARS[v.char].name}</b><small>${CHARS[v.char].perk}</small>`)).join('')}</div>
+    body = `<div class="shop-grid chars-grid">${list('char').map(([id, v]) => item(id, v, medal(v.char), charCap(v.char))).join('')}</div>
       <div class="hint center-t">Спортик, Барыга, Бухгалтер и Громила — бесплатно для всех.</div>`;
   } else if (shopTab === 'frame') {
     body = `<div class="shop-grid">${list('frame').map(([id, v]) => item(id, v, `<span class="pl-pic big ${id}">${myFace()}</span>`, `<b>${v.name}</b>`)).join('')}</div>
       <div class="hint center-t">Рамку видят все: в лобби, в игре, на финале и в топе.</div>`;
   } else if (shopTab === 'dice') {
-    body = `<div class="shop-grid">${list('dice').map(([id, v]) => item(id, v, `<div class="dice mini-dice ${id}"><div class="die">${PIPS[5].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div><div class="die">${PIPS[6].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div></div>`, `<b>${v.name}</b>`)).join('')}</div>
+    body = `<div class="shop-grid">${list('dice').map(([id, v]) => item(id, v, assetFor(id) ? `<img src="${assetFor(id)}" alt="" class="si-img">` : `<div class="dice mini-dice ${id}"><div class="die">${PIPS[5].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div><div class="die">${PIPS[6].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div></div>`, `<b>${v.name}</b>`)).join('')}</div>
       <div class="hint center-t">Твои кубики видят все, когда бросаешь ты.</div>`;
   } else if (shopTab === 'title') {
     body = `<div class="shop-grid">${list('title').map(([id, v]) => item(id, v, `<span class="title-prev">${esc(profile.name || (me && me.name) || 'Ты')}${ttl(id)}</span>`, `<b>${v.name}</b>`)).join('')}</div>
