@@ -10,7 +10,7 @@ const LS = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
 const app = $('#app');
-const QUICK = ['Красава', 'Ха-ха', 'Плати давай', 'Жара пошла', 'Мир', 'Ну ты жук', 'Стрелка?', 'Везёт же', 'Дима, нет!'];
+const QUICK = ['Красава', 'Ха-ха', 'Плати давай', 'Жара пошла', 'Мир', 'Ну ты жук', 'Стрелка?', 'Везёт же', 'Глок, нет!'];
 const ic = (n, cls) => window.IC.ic(n, cls);
 const COIN = ic('coin', 'coin');
 const cellIc = (c) => {
@@ -23,7 +23,7 @@ const giftIc = (g, cls) => {
 };
 const stars = (n) => (n ? `<span class="stars">${ic('star').repeat(n)}</span>` : '');
 const placeBadge = (i) => `<span class="place p${i + 1}">${i + 1}</span>`;
-const CHAR_KEYS = Object.keys(CHARS);
+const CHAR_KEYS = Object.keys(CHARS).filter((k) => !CHARS[k].secret);
 
 let token = LS.get('bratva_token', null);
 let session = LS.get('bratva_session', null);       // сессия Telegram (подписана сервером)
@@ -61,6 +61,14 @@ const charOpen = (k) => !PREMIUM[k] || !wallet || owns(PREMIUM[k].id); // пок
 
 // ---------- Кошелёк ----------
 let wallet = null, starsOk = false;
+// Тема оформления: применяем сразу из памяти устройства, потом сверяем с кошельком
+function applyTheme() {
+  const t = wallet ? (wallet.equip && wallet.equip.theme) || '' : LS.get('bratva_theme', '');
+  const name = t ? t.replace('theme-', '') : '';
+  if (name) document.documentElement.dataset.theme = name; else delete document.documentElement.dataset.theme;
+  if (wallet) LS.set('bratva_theme', t);
+}
+applyTheme();
 const todayStr = () => new Date().toISOString().slice(0, 10);
 async function api(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...ident(), ...body }) });
@@ -69,7 +77,7 @@ async function api(path, body) {
   return d;
 }
 async function loadWallet() {
-  try { const d = await api('/api/me', {}); wallet = d.wallet; myStats = d.stats || myStats; starsOk = d.stars; refreshCoins(); } catch (e) { console.warn('wallet', e.message); }
+  try { const d = await api('/api/me', {}); wallet = d.wallet; myStats = d.stats || myStats; starsOk = d.stars; refreshCoins(); applyTheme(); } catch (e) { console.warn('wallet', e.message); }
 }
 function coinChip() { return `<button class="coin-chip" data-shop>${COIN}<b>${wallet ? wallet.coins : '…'}</b><span class="plus">${ic('plus')}</span></button>`; }
 function refreshCoins() {
@@ -474,7 +482,7 @@ function renderLobby() {
       </div>` : ''}
       ${mine && set.boosts ? `<button class="boost-toggle ${mine.boost ? 'on' : ''}" id="boostT"><span class="bt-ic">${ic('briefcase')}</span><span><b>Подъёмные +${BOOST.pct}%</b><small>Старт $${Math.round(C.START_MONEY * (1 + BOOST.pct / 100))} · ${BOOST.price} монет при старте · у тебя ${wallet ? wallet.coins : '…'}</small></span><i></i></button>` : ''}
       <button class="lb-rules" id="tableSet" ${host ? '' : 'disabled'}>
-        <span class="lr-chip">${ic('flag')}${set.rounds ? set.rounds + ' кругов' : 'До конца'}</span>
+        <span class="lr-chip">${ic('flag')}${set.rounds || 20} кругов</span>
         <span class="lr-chip ${set.glok ? 'on' : ''}">${ic('bolt')}Глок ${set.glok ? 'в деле' : 'выкл'}</span>
         <span class="lr-chip ${set.boosts ? 'on' : ''}">${ic('briefcase')}Бусты ${set.boosts ? 'да' : 'нет'}</span>
         ${host ? `<span class="lr-edit">${ic('menu')}</span>` : ''}
@@ -528,9 +536,9 @@ function tableSheet() {
     const set = st.settings;
     $('#tsbox', m).innerHTML = `<div class="ps-title">Правила стола</div>
       <div class="prof-lbl">Длина партии</div>
-      <div class="seg">${[10, 20, 30, 0].map((n) => `<button data-rounds="${n}" class="${set.rounds === n ? 'on' : ''}">${n ? n + ' кругов' : 'до конца'}</button>`).join('')}</div>
-      <div class="hint">${set.rounds ? 'Когда круги закончатся, победит самый богатый (деньги + точки).' : 'Играем, пока не останется один. С 25-го круга беспредел — рента растёт.'}</div>
-      <button class="glok-toggle ${set.glok ? 'on' : ''}" id="glokT"><span class="gt-av">${pic('glok')}</span><span><b>Смотрящий Дима Глок</b><small>${set.glok ? 'Придёт в любой момент и всё испортит' : 'Выключен. Скучно будет'}</small></span><i></i></button>
+      <div class="seg">${[15, 20, 25].map((n) => `<button data-rounds="${n}" class="${set.rounds === n ? 'on' : ''}">${n} кругов</button>`).join('')}</div>
+      <div class="hint">Когда круги закончатся, победит самый богатый (деньги + точки). Каждый третий круг — событие района, последние 3 круга доля ×1.5.</div>
+      <button class="glok-toggle ${set.glok ? 'on' : ''}" id="glokT"><span class="gt-av">${pic('glok')}</span><span><b>Смотрящий Глок</b><small>${set.glok ? 'Придёт в любой момент и всё испортит' : 'Выключен. Скучно будет'}</small></span><i></i></button>
       <button class="glok-toggle ${set.boosts ? 'on' : ''}" id="boostsT"><span class="gt-av gt-em">${ic('briefcase')}</span><span><b>Донат-бусты</b><small>${set.boosts ? 'Можно брать подъёмные' : 'Все стартуют на равных'}</small></span><i></i></button>`;
     $$('[data-rounds]', m).forEach((b) => b.onclick = () => socket.emit('settings', { rounds: Number(b.dataset.rounds) }));
     $('#glokT', m).onclick = () => socket.emit('settings', { glok: !st.settings.glok });
@@ -677,7 +685,8 @@ function updateGame() {
   const counts = {};
   Object.values(st.props).forEach((v) => { counts[v.owner] = (counts[v.owner] || 0) + 1; });
   const n = st.players.length;
-  $('#players').style.setProperty('--n', n);
+  // 5–6 игроков на телефоне — в две строки по три, чтобы влезли деньги и статистика
+  $('#players').style.setProperty('--n', n <= 4 || innerWidth >= 600 ? n : 3);
   $('#players').dataset.n = n;
   $('#players').innerHTML = st.players.map((p, i) => {
     const delta = prevMoney[p.id] != null ? p.money - prevMoney[p.id] : 0;
@@ -702,7 +711,7 @@ function updateGame() {
   else if (st.phase === 'MOVING') status = `<b style="color:${cp.color}">${name}</b> едет…`;
   else if (st.phase === 'DECIDE') status = mine ? '<b>Решай!</b>' : `<b style="color:${cp.color}">${name}</b> ${pendingText(st.pending)}`;
   else if (st.phase === 'ANIM') status = '…';
-  else if (st.phase === 'GLOK') status = '<b>Дима Глок</b> решает вопросики…';
+  else if (st.phase === 'GLOK') status = '<b>Глок</b> решает вопросики…';
   $('#status').innerHTML = status;
   roll.hidden = !(mine && st.phase === 'ROLL');
   roll.disabled = false;
@@ -716,6 +725,8 @@ function updateGame() {
   st.logs.forEach((l) => { if (l.id > seen.log) { seen.log = l.id; appendLog(l, true); } });
   if (st.fx && st.fx.seq !== seen.fx) { seen.fx = st.fx.seq; showFx(st.fx); }
   updateGlokTask();
+  updateCrowd();
+  updateEventBadge();
   updateOffers();
 
   if (mine && st.phase === 'DECIDE' && st.pending) openSheet(st.pending);
@@ -730,7 +741,7 @@ const TUT = [
   ['crown', 'Цель', 'Стань самым богатым к концу кругов — или останься последним, кто не разорился.'],
   ['dice', 'Ход', 'Бросаешь кости и идёшь по кругу. Свободную точку покупаешь — с каждого, кто на неё встанет, берёшь долю.'],
   ['sword', 'Чужая точка', 'Платишь долю хозяину — или забиваешь стрелку: кубик + сила. Выиграл — точка твоя, проиграл — штраф.'],
-  ['siren', 'Опасности', 'Покупки и стрелки поднимают розыск. На 5 огнях выезжает ОМОН. А Дима Глок раздаёт деньги — иногда честно, иногда это подстава.'],
+  ['siren', 'Опасности', 'Покупки и стрелки поднимают розыск. На 5 огнях выезжает ОМОН. А Глок раздаёт деньги — иногда честно, иногда это подстава.'],
 ];
 const TIPS = {
   roll: ['dice', 'Твой ход', 'Жми «Бросить кости». Фишка пройдёт столько клеток, сколько выпало. Дубль — ходишь ещё раз.'],
@@ -805,14 +816,58 @@ function pendingText(q) {
   return { BUY: `думает купить ${c}`, UPGRADE: `прокачивает ${c}?`, GYM: 'выбирает братка', CASINO: 'у рулетки…', STRELKA: `на чужой точке ${c}`, JAIL: 'сидит в тюрьме', OCHKO: `играет в очко: ${q.sum || ''}` }[q.type] || 'думает';
 }
 
-// ---------- Задания Димы Глока ----------
+// ---------- Задания Глока ----------
 let glokSeq = 0, glokEl = null;
 function glokCard(inner) {
   return `<div class="fx glok-fx"><div class="glok-card">
     <div class="glok-badge">${pic('glok')}</div>
-    <div class="glok-name">ДИМА ГЛОК</div>
+    <div class="glok-name">ГЛОК</div>
     <div class="glok-role">смотрящий за районом</div>${inner}</div></div>`;
 }
+// ---------- Наезд толпой ----------
+let crowdEl = null, crowdSeq = 0;
+function updateCrowd() {
+  const c = st.crowd;
+  if (!c) { if (crowdEl) { const e = crowdEl; e.classList.remove('show'); setTimeout(() => e.remove(), 250); crowdEl = null; } return; }
+  const a = byId(c.a), o = byId(c.o), mp = meP();
+  const canJoin = mp && !mp.bankrupt && myId !== c.a && myId !== c.o && !c.joins.includes(myId);
+  const joined = c.joins.map((id) => byId(id)).filter(Boolean);
+  const body = `<div class="fx crowd-fx"><div class="ev-kicker">Наезд толпой</div>
+    <div class="fx-title">НА ${esc(o ? o.name.toUpperCase() : '')}</div>
+    <div class="ev-text"><b style="color:${a ? a.color : '#fff'}">${esc(a ? a.name : '')}</b> зовёт братву на «${esc(BOARD[c.cell].name)}». ${esc(o ? o.name : '')} — самый богатый на районе.</div>
+    <div class="crowd-rules">Вписался: +2 к силе нападающему. Отожмут — каждому $50 с хозяина. Сольют — каждый платит хозяину $40.</div>
+    <div class="crowd-list">${joined.length ? joined.map((x) => `<span style="--c:${x.color}">${esc(x.name)}</span>`).join('') : '<em>пока никто</em>'}</div>
+    ${myId === c.o ? '<div class="crowd-me bad">Это наезд на тебя. Держись.</div>' : myId === c.a ? '<div class="crowd-me">Ждём, кто впишется…</div>'
+      : `<button class="btn red big crowd-join" ${canJoin ? '' : 'disabled'}>${canJoin ? 'ВПИСАТЬСЯ' : 'Ты вписался'}</button>`}
+    <div class="sh-timer"><i class="glok-bar" style="animation-duration:${c.ms}ms"></i></div></div>`;
+  if (crowdEl && crowdSeq === c.seq) {
+    const keep = $('.glok-bar', crowdEl);
+    crowdEl.innerHTML = body;
+    const nb = $('.glok-bar', crowdEl); if (keep && nb) nb.replaceWith(keep);
+  } else {
+    if (crowdEl) crowdEl.remove();
+    crowdSeq = c.seq;
+    crowdEl = document.createElement('div');
+    crowdEl.className = 'overlay show crowd-task';
+    crowdEl.innerHTML = body;
+    document.body.appendChild(crowdEl);
+    SFX.play('fight'); SFX.vibe([60, 40, 60]);
+  }
+  const b = $('.crowd-join', crowdEl);
+  if (b && canJoin) b.onclick = () => { socket.emit('crowd', { seq: c.seq }); b.disabled = true; b.textContent = 'Ты вписался'; SFX.play('click'); };
+}
+function updateEventBadge() {
+  const host = $('.center-top');
+  if (!host) return;
+  let el = $('#evbadge');
+  const e = st.event, fin = st.finale;
+  const txt = e ? e.title : fin ? 'ПОСЛЕДНИЕ ДЕНЬКИ' : '';
+  if (!txt) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'evbadge'; el.className = 'ev-badge'; host.after(el); }
+  el.textContent = txt;
+  el.title = e ? e.text : 'Доля ×1.5 до конца игры';
+}
+
 function updateGlokTask() {
   const t = st.glokTask;
   if (!t) return closeGlokTask();
@@ -825,13 +880,13 @@ function updateGlokTask() {
   glokSeq = t.seq;
   const mp = meP(), dead = !mp || mp.bankrupt;
   SFX.play('glok'); SFX.vibe([100, 60, 100]);
-  flash('ДИМА ГЛОК ПРИШЁЛ', 'glok');
+  flash('ГЛОК ПРИШЁЛ', 'glok');
   glokEl = document.createElement('div');
   glokEl.className = 'overlay show glok-task';
   glokEl.innerHTML = glokCard(`
     <div class="glok-line">«${esc(t.line)}»</div>
     <div class="glok-title">КТО ПЕРВЫЙ — ТОМУ $${t.prize}</div>
-    <div class="glok-text">Дима раздаёт. Может, честно. А может, и нет — с Глоком никогда не знаешь.</div>
+    <div class="glok-text">Глок раздаёт. Может, честно. А может, и нет — с Глоком никогда не знаешь.</div>
     <button class="btn gold big glok-btn" ${dead ? 'disabled' : ''}>ЗАБРАТЬ $${t.prize}</button>
     <div class="sh-timer"><i class="glok-bar" style="animation-duration:${t.ms}ms"></i></div>`);
   document.body.appendChild(glokEl);
@@ -966,17 +1021,32 @@ function casinoFx(fx) {
   const res = (won, lost, extra) => `<div class="fx-res ${won ? 'good' : 'badr'}">${won ? `+$${won}` : lost}${extra || ''}</div>`;
   if (fx.type === 'slots') {
     const reel = ['cherry', 'lemon', 'bell', 'diamond', 'seven'];
-    const sym = (n) => ic('sl-' + n, 'sym sym-' + n);
-    const ov = overlay(`<div class="fx casino slot-fx"><div class="fx-title">АВТОМАТ</div><div class="fx-sub">${who} · ставка $${fx.bet}</div>
-      <div class="slot-machine"><div class="reels"><span>${sym('cherry')}</span><span>${sym('lemon')}</span><span>${sym('diamond')}</span></div><i class="slot-line"></i></div>
-      ${res(fx.won, `−$${fx.bet}`, fx.reels.every((x) => x === 'seven') ? '<div class="jack">ДЖЕКПОТ</div>' : '')}</div>`, 2200);
-    const spans = $$('.reels span', ov);
-    let n = 0;
-    const iv = setInterval(() => {
-      spans.forEach((s, i) => { if (n <= 6 + i * 4) { s.innerHTML = sym(reel[Math.floor(Math.random() * reel.length)]); s.classList.add('spin'); } else { s.innerHTML = sym(fx.reels[i]); s.classList.remove('spin'); } });
-      if (n === 7 || n === 11 || n === 15) SFX.play('tick');
-      if (++n > 15) { clearInterval(iv); ov.classList.add('done'); SFX.play(fx.won ? 'casino-win' : 'lose'); }
-    }, 70);
+    const sym = (n) => `<b class="sl-cell s-${n}">${ic('sl-' + n, 'sym sym-' + n)}</b>`;
+    const STOP = 16, H = 64;
+    const strip = (fin) => Array.from({ length: STOP + 2 }, (_, k) => sym(k === STOP ? fin : reel[Math.floor(Math.random() * reel.length)])).join('');
+    const jack = fx.reels.every((x) => x === 'seven');
+    const bulbs = Array.from({ length: 14 }, (_, k) => `<i style="--k:${k}"></i>`).join('');
+    const ov = overlay(`<div class="fx casino slot2">
+      <div class="sl-marquee"><div class="sl-bulbs">${bulbs}</div><div class="sl-title">${ic('sl-seven', 'sym')}АВТОМАТ${ic('sl-seven', 'sym')}</div></div>
+      <div class="sl-sub">${who} · ставка $${fx.bet}</div>
+      <div class="sl-body"><div class="sl-window">${fx.reels.map((f) => `<div class="sl-reel"><div class="sl-strip">${strip(f)}</div></div>`).join('')}<i class="sl-pay"></i></div>
+        <div class="sl-lever"><i></i></div></div>
+      <div class="sl-pays"><span>${ic('sl-cherry', 'sym')}×3</span><span>${ic('sl-bell', 'sym')}×6</span><span>${ic('sl-diamond', 'sym')}×10</span><span>${ic('sl-seven', 'sym')}×25</span></div>
+      ${res(fx.won, `−$${fx.bet}`, jack ? '<div class="jack">ДЖЕКПОТ</div>' : '')}</div>`, 4200);
+    const strips = $$('.sl-strip', ov);
+    requestAnimationFrame(() => {
+      $('.sl-lever', ov).classList.add('pull');
+      strips.forEach((st_, i) => {
+        st_.style.transitionDuration = `${1500 + i * 450}ms`;
+        st_.style.transform = `translateY(${-(STOP - 1) * H}px)`;
+        setTimeout(() => { SFX.play('tick'); st_.parentElement.classList.add('stopped'); }, 1500 + i * 450);
+      });
+    });
+    setTimeout(() => {
+      ov.classList.add('done');
+      if (fx.won) { ov.classList.add('win'); $$('.sl-strip', ov).forEach((x) => x.children[STOP].classList.add('hit')); coinBurst(ov, jack ? 40 : 18); }
+      SFX.play(fx.won ? 'casino-win' : 'lose');
+    }, 1500 + 2 * 450 + 150);
   } else if (fx.type === 'roulette') {
     const name = { red: 'красное', black: 'чёрное', zero: 'зеро' };
     const ov = overlay(`<div class="fx casino roul-fx"><div class="fx-title">РУЛЕТКА</div><div class="fx-sub">${who} ставит $${fx.bet} на ${name[fx.color]}</div>
@@ -1154,11 +1224,18 @@ function showFx(fx) {
     SFX.play(fx.result ? 'cash' : 'glok'); SFX.vibe([80, 40, 80]);
     closeGlokTask();
     overlay(glokCard(`${fx.line ? `<div class="glok-line">«${esc(fx.line)}»</div>` : ''}<div class="glok-title">${esc(fx.title)}</div><div class="glok-text">${esc(fx.text)}</div>`), fx.result ? 2600 : 3200);
-    if (!fx.result) flash('ДИМА ГЛОК ПРИШЁЛ', 'glok');
+    if (!fx.result) flash('ГЛОК ПРИШЁЛ', 'glok');
   } else if (fx.type === 'pot') {
     const p = byId(fx.pid);
     SFX.play('casino-win');
     overlay(`<div class="fx casino"><div class="fx-title">ДЖЕКПОТ</div><div class="fx-sub">${p ? esc(p.name) : ''} встал ровно на Общак</div><div class="pot-big">+$${fx.amount}</div></div>`, 1800).classList.add('done');
+  } else if (fx.type === 'event') {
+    SFX.play('omon');
+    overlay(`<div class="fx event-fx"><div class="ev-kicker">Событие района</div><div class="fx-title">${esc(fx.title)}</div><div class="ev-text">${esc(fx.text)}</div></div>`, 3200);
+  } else if (fx.type === 'secret') {
+    const p = byId(fx.pid);
+    SFX.play('glok'); SFX.vibe([80, 60, 160]);
+    overlay(`<div class="fx secret-fx"><div class="ev-kicker">Тайный персонаж</div><div class="secret-pic">${medal('budka')}</div><div class="fx-title">БУДКА</div><div class="ev-text">${p ? `<b>${esc(p.name)}</b> в этой партии — Будка.` : ''} Заговорщик: стрелки, менты, ОМОН, налоги и звонки ему нипочём. Достать его может только Глок — и бьёт вдвое.</div></div>`, 4200);
   } else if (fx.type === 'deal') {
     const b = byId(fx.buyer), s = byId(fx.seller), c = BOARD[fx.cell];
     flash(`Сделка: ${c.name} за $${fx.price}`, 'deal');
@@ -1167,17 +1244,27 @@ function showFx(fx) {
 }
 
 const READ = 1.6; // во сколько раз дольше держим всплывающие сцены
+function coinBurst(host, n) {
+  const box = document.createElement('div'); box.className = 'coin-burst';
+  box.innerHTML = Array.from({ length: n }, () => `<i style="--x:${Math.round(Math.random() * 260 - 130)}px;--y:${Math.round(-120 - Math.random() * 160)}px;--d:${(Math.random() * .4).toFixed(2)}s;--r:${Math.round(Math.random() * 720 - 360)}deg">${ic('coin', 'coin')}</i>`).join('');
+  (host.querySelector('.fx') || host).appendChild(box);
+  setTimeout(() => box.remove(), 1800);
+}
 function overlay(html, ms) {
+  // новая сцена убирает предыдущую, чтобы они не наслаивались
+  $$('.overlay.scene').forEach((o) => o.remove());
   const ov = document.createElement('div');
-  ov.className = 'overlay';
+  ov.className = 'overlay scene';
   ov.innerHTML = html;
   document.body.appendChild(ov);
   requestAnimationFrame(() => ov.classList.add('show'));
   // время показа зависит от объёма текста — чтобы успеть прочитать
   const words = (ov.textContent || '').trim().split(/\s+/).length;
   ms = Math.min(7000, Math.max(Math.round(ms * READ), 1600 + words * 230));
+  const t0 = Date.now();
   setTimeout(() => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 300); }, ms);
-  ov.onclick = () => ov.remove();
+  // случайный тап не обрывает сцену: закрыть можно только когда анимация уже показала результат
+  ov.onclick = (e) => { e.stopPropagation(); if (Date.now() - t0 > Math.min(ms * 0.6, 2500)) { ov.classList.remove('show'); setTimeout(() => ov.remove(), 250); } };
   return ov;
 }
 function flash(text, cls) {
@@ -1234,8 +1321,11 @@ function openSheet(q) {
       html = head(ic('sword'), 'Чужая территория', `«${c.name}» держит ${esc(q.ownerName)}`, byId(q.owner) && byId(q.owner).color) +
         `<div class="sh-info"><div>Доля хозяину <b class="neg">$${q.rent}</b></div><div>Штраф за слив <b class="neg">$${q.rent * 2}</b></div></div>` +
         `<div class="power"><div><span>Ты</span><b>кубик + ${q.my}</b></div><div class="vs-x">VS</div><div><span>${esc(q.ownerName)}</span><b>кубик + ${q.his}</b></div></div>` +
-        `<div class="hint">Сила = авторитет + братки (+2 у Бойца). Победа — точка твоя (−1 звезда), +1 авторитет. Ничья за хозяином.</div>` +
-        btns([['pay', `Заплатить $${q.rent}`], ['fight', 'Забить стрелку', 'red']]);
+        `<div class="chance ${q.chance >= 55 ? 'good' : q.chance >= 35 ? 'mid' : 'bad'}"><span>Шанс отжать</span><b>${q.chance}%</b><i style="width:${q.chance}%"></i></div>` +
+        `<div class="hint">Твоя сила — авторитет (до 3) + братки. У хозяина ещё +1 за свою землю и +1 за каждую звезду точки. Победа: точка твоя, звёзды слетают, хозяину откуп $${Math.round(BOARD[q.cell].price / 20) * 10}. Ничья — за хозяином.</div>` +
+        (q.noFight ? `<div class="warn-box">${ic('lock')}Это точка Будки. Заговорщик: стрелку ему не забить — только платить.</div>` + btns([['pay', `Заплатить $${q.rent}`, 'gold']])
+          : btns([['pay', `Заплатить $${q.rent}`], ['fight', 'Забить стрелку', 'red']]) +
+            (q.crowd ? `<button class="btn crowd-btn" data-choice="crowd">${ic('fist')}Наезд толпой<small>${esc(q.ownerName)} самый богатый — позови братву: каждый вписавшийся +2 к силе</small></button>` : ''));
       break;
     case 'JAIL':
       html = head(ic('lock'), 'Ты в тюрьме', 'Сидишь один ход') +
@@ -1326,14 +1416,17 @@ function showChars() {
 function showRules() {
   modal(`<div class="rules">
     <h2>Как играть</h2>
-    <p><b>Ход.</b> Бросаешь две кости и идёшь по кругу. Прошёл Общак — получи $${C.SALARY}. Встал на него ровно — забираешь джекпот: туда падает половина всех налогов и штрафов. Дубль — ходишь ещё раз, три дубля подряд — к ментам.</p>
-    <p><b>Свободная точка</b> — можно взять под крышу. Своя — прокачать до трёх звёзд, каждая звезда удваивает ренту. Оба цвета района у тебя — рента ×2.</p>
-    <p><b>Чужая точка</b> — плати долю или забивай стрелку: кубик + авторитет + братки против хозяина. Выиграл — точка твоя. Слил — штраф ×2 и минус браток.</p>
+    <p><b>Ход.</b> Бросаешь две кости и идёшь по кругу. Прошёл Общак — получи $${C.SALARY}; самому бедному Общак докидывает ещё $${C.CATCHUP}. Встал на Общак ровно — забираешь джекпот. Дубль — ходишь ещё раз, три дубля подряд — к ментам.</p>
+    <p><b>Свободная точка</b> — можно взять под крышу. Своя — прокачать до трёх звёзд, каждая звезда удваивает долю. Оба цвета района у тебя — доля ×2.</p>
+    <p><b>Чужая точка</b> — плати долю или забивай стрелку. Твоя сила: авторитет (максимум 3) + братки. У хозяина: его сила +1 за свою землю +1 за каждую звезду. Плюс у каждого кубик. Шанс видно до решения. Отжал — точка твоя, звёзды слетают, хозяину откуп в полцены. Слил — штраф ×2 и минус браток.</p>
+    <p><b>Наезд толпой.</b> Если хозяин точки — самый богатый, можно позвать остальных. Каждый вписавшийся даёт +2 к силе. Отожмёте — каждому $50 с хозяина, сольёте — каждый платит ему $40.</p>
+    <p><b>Налоговая</b> берёт 10% от всего капитала — денег и точек. Богатым больнее.</p>
+    <p><b>События района.</b> Каждый третий круг — событие: Час пик (доля ×2), Жирный круг (Общак вдвое), Передел (+2 нападающим), Облава, Дефолт, Амнистия. Последние 3 круга — доля ×1.5.</p>
     <p><b>Сделки</b> — в любой момент можно продать свою точку или выкупить чужую, кнопка сделки вверху экрана.</p>
-    <p><b>Персонажи.</b> Спортик сильнее на стрелках, Барыга покупает дешевле, Адвокат не сидит, Шулер везуч в казино, Блатной неприкасаем для Глока, Бухгалтер получает больше с Общака, Громила нанимает братков за полцены.</p>
+    <p><b>Персонажи</b> — у каждого своя фишка, посмотреть можно в «Персонажах». А иногда при старте одному игроку выпадает тайный <b>Будка</b>: заговорщик, на которого действует только Глок.</p>
     <p><b>Розыск</b> растёт от покупок, прокачек, стрелок и казино. На пятом огоньке выезжает ОМОН. Кого накроет — штраф или минус браток.</p>
-    <p><b>Дима Глок</b> — смотрящий за районом. Приходит когда захочет: шмонает богатых, путает бабки, гоняет всех назад, закрывает точки, обносит джекпот и раздаёт деньги: «кто первый нажмёт — заберёт». Выглядит всегда одинаково, но внутри может быть подстава: штраф, меченые купюры (сразу в тюрьму), развод на братка. Чем дольше игра, тем больше подстав.</p>
-    <p><b>Победа</b> — последний оставшийся или самый богатый, когда кончатся круги. Результаты идут в топ братвы.</p>
+    <p><b>Глок</b> — смотрящий за районом. Приходит когда захочет: шмонает богатых, путает бабки, закрывает точки и раздаёт деньги: «кто первый нажмёт — заберёт». Выглядит всегда одинаково, но внутри может быть подстава. Чем дольше игра, тем больше подстав.</p>
+    <p><b>Победа</b> — самый богатый (деньги + точки), когда кончатся круги: 15, 20 или 25. Или последний, кто не разорился.</p>
   </div>`);
 }
 
@@ -1379,7 +1472,7 @@ function renderOver() {
 
 
 // ---------- Магазин ----------
-const SHOP_TABS = [['coins', 'Монеты', 'coin'], ['chars', 'Персонажи', 'masks'], ['frame', 'Рамки', 'frame'], ['dice', 'Кубики', 'dice'], ['title', 'Титулы', 'tag'], ['gifts', 'Подарки', 'gift']];
+const SHOP_TABS = [['coins', 'Монеты', 'coin'], ['chars', 'Персонажи', 'masks'], ['frame', 'Рамки', 'frame'], ['dice', 'Кубики', 'dice'], ['title', 'Титулы', 'tag'], ['theme', 'Темы', 'frame'], ['gifts', 'Подарки', 'gift']];
 let shopTab = 'coins', shopFocus = null;
 const myFace = () => (me && me.photo ? `<img src="${esc(me.photo)}" alt="" referrerpolicy="no-referrer">` : pic(profile.char));
 function renderShop(tab, focus) {
@@ -1424,6 +1517,9 @@ function renderShop(tab, focus) {
   } else if (shopTab === 'dice') {
     body = `<div class="shop-grid">${list('dice').map(([id, v]) => item(id, v, assetFor(id) ? `<img src="${assetFor(id)}" alt="" class="si-img">` : `<div class="dice mini-dice ${id}"><div class="die">${PIPS[5].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div><div class="die">${PIPS[6].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div></div>`, `<b>${v.name}</b>`)).join('')}</div>
       <div class="hint center-t">Твои кубики видят все, когда бросаешь ты.</div>`;
+  } else if (shopTab === 'theme') {
+    body = `<div class="shop-grid">${list('theme').map(([id, v]) => item(id, v, `<div class="theme-prev" data-theme="${id.replace('theme-', '')}"><i class="tp-board"><i class="tp-felt"></i></i><i class="tp-cta"></i></div>`, `<b>${v.name}</b>`)).join('')}</div>
+      <div class="hint center-t">Тема меняет оформление игры только у тебя: фон, поле, стол и кнопки. Сняв тему, вернёшься к классической «Братве».</div>`;
   } else if (shopTab === 'title') {
     body = `<div class="shop-grid">${list('title').map(([id, v]) => item(id, v, `<span class="title-prev">${esc(profile.name || (me && me.name) || 'Ты')}${ttl(id)}</span>`, `<b>${v.name}</b>`)).join('')}</div>
       <div class="hint center-t">Титул висит под именем в лобби, в игре и в топе.</div>`;
@@ -1452,7 +1548,7 @@ async function buyItem(id, btn) {
   if (!wallet || wallet.coins < it.price) { toast(`Не хватает ${it.price - (wallet ? wallet.coins : 0)} монет`); SFX.play('bad'); return renderShop('coins'); }
   btn.disabled = true;
   try {
-    wallet = (await api('/api/buy', { item: id })).wallet;
+    wallet = (await api('/api/buy', { item: id })).wallet; applyTheme();
     SFX.play('buy'); SFX.vibe([30, 30, 60]);
     toast(it.kind === 'char' ? `${CHARS[it.char].name} теперь твой!` : `Куплено: ${it.name}`);
     if (it.kind === 'char') { profile.char = it.char; LS.set('bratva_profile', profile); if (st && st.status === 'LOBBY') socket.emit('setChar', { char: it.char }); }
@@ -1460,7 +1556,7 @@ async function buyItem(id, btn) {
   renderShop(shopTab);
 }
 async function equipItem(slot, item) {
-  try { wallet = (await api('/api/equip', { slot, item })).wallet; SFX.play('click'); } catch (e) { toast(e.message); }
+  try { wallet = (await api('/api/equip', { slot, item })).wallet; applyTheme(); SFX.play('click'); } catch (e) { toast(e.message); }
   renderShop(shopTab);
 }
 async function claimDaily() {
@@ -1572,4 +1668,6 @@ Promise.race([assetsReady, new Promise((r) => setTimeout(r, 1200))]).then(() => 
   if (!token) render();
   else setTimeout(() => { if (!screen) render(); }, 800);
 });
+// отладка сцен: ?fxdebug — открывает доступ к показу сцен для визуальной проверки
+if (/[?&]fxdebug\b/.test(location.search)) window.__dbg = { showFx: (x) => showFx(x), setSt: (x) => { st = x; }, crowd: () => updateCrowd(), setMe: (id) => { myId = id; } };
 })();

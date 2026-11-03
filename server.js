@@ -115,7 +115,7 @@ app.post('/api/buy', wrap(async (req, res) => {
 }));
 app.post('/api/equip', wrap(async (req, res) => {
   const a = who(req), { slot, item } = req.body || {};
-  if (!a || !['frame', 'dice', 'title'].includes(slot)) return res.status(400).json({ error: 'Не тот слот' });
+  if (!a || !['frame', 'dice', 'title', 'theme'].includes(slot)) return res.status(400).json({ error: 'Не тот слот' });
   const w = await store.wallet(a.key);
   if (item && (!SHOP[item] || SHOP[item].kind !== slot || !w.items.includes(item))) return res.status(400).json({ error: 'Сначала купи' });
   res.json({ wallet: await store.setEquip(a.key, slot, item || null) });
@@ -165,7 +165,7 @@ function newCode() {
   return c;
 }
 const cleanName = (s) => String(s || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 12);
-const cleanChar = (s) => (CHARS[s] ? s : 'boec');
+const cleanChar = (s) => (CHARS[s] && !CHARS[s].secret ? s : 'boec');
 const has = (p, ch) => p && p.char === ch;
 
 function makePlayer(r, name, char, account, bot = false) {
@@ -214,6 +214,8 @@ function publicState(r) {
     logs: r.logs, dice: r.dice, lastMove: r.lastMove, fx: r.fx, round: r.round,
     winner: r.winner, standings: r.standings, titles: r.titles, sealed: r.sealed,
     offers: r.offers.map(({ id, from, to, cell, price, mode, until }) => ({ id, from, to, cell, price, mode, ms: Math.max(0, until - Date.now()) })),
+    crowd: r.crowd ? { seq: r.crowd.seq, a: r.crowd.a, o: r.crowd.o, cell: r.crowd.cell, joins: r.crowd.joins, ms: T(r.crowd.ms) } : null,
+    event: r.event && r.event.round === r.round ? { id: r.event.id, title: r.event.title, text: r.event.text } : null, finale: finalStretch(r),
     glokTask: r.glokTask ? { seq: r.glokTask.seq, prize: r.glokTask.prize, ms: T(r.glokTask.ms), line: r.glokTask.line, taps: r.glokTask.taps } : null,
     remaining: r.deadline ? Math.max(0, r.deadline - Date.now()) : null, total: r.deadlineTotal,
   };
@@ -241,8 +243,16 @@ const heat = (r, n) => { r.heat = Math.min(C.MAX_HEAT, r.heat + n); };
 const cellName = (id) => BOARD[id].name;
 const goonPrice = (p) => (has(p, 'gromila') ? 30 : C.GOON_PRICE);
 const maxGoons = (p) => (has(p, 'gromila') ? 4 : C.MAX_GOONS);
-const buyPrice = (p, c) => (has(p, 'baryga') ? Math.round((c.price * 0.85) / 5) * 5 : c.price);
-const power = (p) => p.auth + p.goons + (has(p, 'boec') ? 2 : 0);
+const buyPrice = (p, c) => (has(p, 'baryga') ? Math.round((c.price * 0.8) / 5) * 5 : c.price);
+const upPrice = (p, c) => (has(p, 'baryga') ? Math.round((c.up * 0.8) / 5) * 5 : c.up);
+// Сила на стрелке: авторитет (не больше 3) + братки.
+// Спортик держит свои точки: +1 к защите.
+// Защитник получает +1 за свою землю и +1 за каждую звезду точки — прокачанную точку отжать труднее.
+const AUTH_CAP = 3;
+const power = (p) => Math.min(AUTH_CAP, p.auth) + p.goons;
+const defense = (r, owner, cell) => power(owner) + 1 + ((r.props[cell] && r.props[cell].level) || 0) + (has(owner, 'boec') ? 1 : 0);
+// шанс победы нападающего: кубик+сила против кубик+защита, ничья за хозяином
+const winChance = (my, his) => { let w = 0; for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) if (a + my > b + his) w++; return Math.round((w / 36) * 100); };
 const track = (p) => { p.st.maxMoney = Math.max(p.st.maxMoney, p.money); };
 
 function armTimer(r) {
@@ -261,12 +271,23 @@ function startTurn(r) {
 }
 
 function moveBy(r, p, steps) {
+  if (has(p, 'shchipach') && steps > 1) {
+    const passed = new Set(); for (let k = 1; k < steps; k++) passed.add((p.pos + k) % N);
+    others(r, p).filter((o) => passed.has(o.pos) && !has(o, 'budka')).forEach((o) => {
+      const got = pay(r, o, 15, p);
+      if (got) log(r, `Щипач ${p.name} проехал мимо ${o.name} и вытащил $${got}`, 'rent', { pid: p.id });
+    });
+  }
   p.pos += steps;
   if (p.pos >= N) {
     p.pos -= N;
-    const sal = C.SALARY + (has(p, 'buhgalter') ? 60 : 0);
-    p.money += sal; track(p);
-    log(r, `${p.name} заглянул в Общак: +$${sal}`, 'salary', { pid: p.id });
+    const sal = (C.SALARY + (has(p, 'buhgalter') ? 40 : 0)) * (eventOn(r, 'gold') ? 2 : 1);
+    // Общак своих не бросает: самому бедному — подъёмные сверху
+    const al = active(r);
+    const poorest = al.length > 2 && al.every((o) => o === p || netWorth(r, o) > netWorth(r, p));
+    const help = poorest ? C.CATCHUP : 0;
+    p.money += sal + help; track(p);
+    log(r, `${p.name} заглянул в Общак: +$${sal}${help ? ` и ещё +$${help} — Общак своих не бросает` : ''}`, 'salary', { pid: p.id });
   }
 }
 
@@ -296,6 +317,7 @@ function doRoll(r) {
 }
 
 function sendToJail(r, p) {
+  if (has(p, 'budka')) { log(r, `Будку не закрыть — у него всё схвачено`, 'goon', { pid: p.id }); return; }
   p.st.jail += 1;
   if (has(p, 'advokat')) {
     p.pos = C.JAIL; p.extra = false; p.doubles = 0;
@@ -347,17 +369,35 @@ function land(r) {
     }
     case 'card': return drawCard(r, p);
     case 'tax': {
-      let t = Math.max(20, Math.round((p.money * 0.1) / 10) * 10);
+      // налог с капитала: деньги + точки — богатый платит больше
+      let t = Math.max(20, Math.round((netWorth(r, p) * 0.1) / 10) * 10);
       if (has(p, 'advokat')) t = Math.round(t / 20) * 10;
+      if (has(p, 'budka')) { log(r, `Налоговая: к Будке не сунулись`, 'info', { pid: p.id }); return afterAction(r, 300); }
       log(r, `Налоговая: ${p.name} заносит $${t} — деньги ушли в Общак`, 'loss', { pid: p.id });
       pay(r, p, t, null);
       return afterAction(r, 300);
     }
-    case 'police': sendToJail(r, p); return afterAction(r, 400);
+    case 'police':
+      if (has(p, 'oboroten')) {
+        log(r, `Оборотень ${p.name} зашёл к своим в отдел — сидеть не будет`, 'goon', { pid: p.id });
+        return afterAction(r, 400);
+      }
+      sendToJail(r, p); return afterAction(r, 400);
     case 'jail': log(r, `${p.name} навестил кентов в тюрьме`, 'info'); return afterAction(r);
     default: return afterAction(r);
   }
 }
+
+// Текущая доля с точки: базовая рента × беспредел × Коммерсант × события района
+function rentNow(r, cell, owner) {
+  let x = G.rentOf(r.props, cell) * (r.inflation || 1);
+  if (owner && has(owner, 'kommers')) x *= 1.15;
+  if (eventOn(r, 'rush')) x *= 2;
+  if (finalStretch(r)) x *= 1.5;
+  return Math.round(x / 5) * 5;
+}
+const netW = (r, p) => netWorth(r, p);
+const isLeader = (r, p) => { const al = active(r); return al.length > 1 && al.every((o) => o === p || netW(r, o) < netW(r, p)); };
 
 function landProp(r, p, c) {
   const pr = r.props[c.id];
@@ -368,17 +408,20 @@ function landProp(r, p, c) {
     return afterAction(r);
   }
   if (pr.owner === p.id) {
-    if (pr.level < C.MAX_LEVEL && p.money >= c.up) return ask(r, { type: 'UPGRADE', cell: c.id, price: c.up, level: pr.level });
+    if (pr.level < C.MAX_LEVEL && p.money >= upPrice(p, c)) return ask(r, { type: 'UPGRADE', cell: c.id, price: upPrice(p, c), level: pr.level });
     return afterAction(r);
   }
   const owner = byId(r, pr.owner);
   if (!owner || owner.bankrupt) return afterAction(r);
   if (r.sealed && r.sealed.cell === c.id && r.round <= r.sealed.until) {
-    log(r, `«${c.name}» опечатана Димой Глоком — ${p.name} проходит бесплатно`, 'glok');
+    log(r, `«${c.name}» опечатана Глоком — ${p.name} проходит бесплатно`, 'glok');
     return afterAction(r);
   }
-  const rent = G.rentOf(r.props, c.id) * (r.inflation || 1);
-  return ask(r, { type: 'STRELKA', cell: c.id, rent, owner: owner.id, ownerName: owner.name, my: power(p), his: power(owner) });
+  const rent = rentNow(r, c.id, owner);
+  const my = power(p) + (eventOn(r, 'peredel') ? 2 : 0), his = defense(r, owner, c.id);
+  const leader = isLeader(r, owner) && active(r).length >= 3;
+  return ask(r, { type: 'STRELKA', cell: c.id, rent, owner: owner.id, ownerName: owner.name, my, his, chance: winChance(my, his), level: r.props[c.id].level,
+    noFight: has(owner, 'budka'), crowd: leader && !has(owner, 'budka') });
 }
 
 // ---------- Карточки «Звонок с зоны» ----------
@@ -389,7 +432,7 @@ const CARDS = [
   { t: 'Адвокат выставил счёт: −$80', f: (r, p) => pay(r, p, 80, null) },
   { t: 'Сбор с района: каждый платит тебе $25', f: (r, p) => others(r, p).forEach((o) => pay(r, o, 25, p)) },
   { t: 'Скинулся на общак: по $20 каждому', f: (r, p) => others(r, p).forEach((o) => pay(r, p, 20, o)) },
-  { t: 'Порешал вопрос красиво: авторитет +1', f: (r, p) => { p.auth += 1; } },
+  { t: 'Порешал вопрос красиво: авторитет +1', f: (r, p) => { p.auth = Math.min(AUTH_CAP, p.auth + 1); } },
   { t: 'Кто-то стуканул: розыск +2', f: (r) => heat(r, 2) },
   { t: 'Связи в прокуратуре: розыск обнулён', f: (r) => { r.heat = 0; r.omon = null; } },
   { t: 'В бригаду пришёл новый браток', f: (r, p) => { p.goons = Math.min(maxGoons(p), p.goons + 1); } },
@@ -417,13 +460,22 @@ function drawCard(r, p) {
       later(r, T(steps * C.HOP_MS + 600), () => land(r));
     });
   }
-  card.f(r, p); track(p);
+  const before = p.money;
+  card.f(r, p);
+  const d = p.money - before;
+  if (!p.bankrupt && d && has(p, 'ekstrasens')) {
+    const k = d > 0 ? Math.round(d * 0.5) : Math.round(-d * 0.5);
+    p.money += k;
+    log(r, `Экстрасенс ${p.name} всё предвидел: ${d > 0 ? '+' : 'вернул '}$${k}`, 'card', { pid: p.id });
+  } else if (!p.bankrupt && d < 0 && has(p, 'budka')) { p.money -= d; log(r, `Будке это не грозит — деньги при нём`, 'card', { pid: p.id }); }
+  track(p);
   afterAction(r, 2000);
 }
 
 // ---------- Деньги и банкротство ----------
 // to === null — деньги уходят в джекпот Общака
 function pay(r, p, amount, to) {
+  if (r._glok && has(p, 'budka')) amount *= 2; // на Будку действует только Глок — и бьёт вдвое
   p.money -= amount;
   if (p.money < 0) liquidate(r, p);
   const paid = Math.max(0, p.money < 0 ? amount + p.money : amount);
@@ -502,7 +554,7 @@ function casinoPlay(r, p, q, choice) {
     const won = profit > 0 ? casinoWin(r, p, profit, text, {}) : 0;
     if (!profit) casinoLose(r, p, bet, 'автомат съел ставку');
     r.fx = { type: 'slots', pid: p.id, bet, reels: syms, won, seq: ++r.fxSeq };
-    return 2300;
+    return 3000;
   }
   if (game === 'roulette') {
     const color = ['red', 'black', 'zero'].includes(pick) ? pick : 'red';
@@ -580,8 +632,8 @@ function resolve(r, choice) {
     }
     case 'UPGRADE': {
       const c = BOARD[q.cell], pr = r.props[q.cell];
-      if (choice === 'yes' && pr && pr.owner === p.id && pr.level < C.MAX_LEVEL && p.money >= c.up) {
-        p.money -= c.up; pr.level += 1; heat(r, 1);
+      if (choice === 'yes' && pr && pr.owner === p.id && pr.level < C.MAX_LEVEL && p.money >= upPrice(p, c)) {
+        p.money -= upPrice(p, c); pr.level += 1; heat(r, 1);
         log(r, `${p.name} прокачал «${c.name}» до ${pr.level} ${pr.level === 1 ? 'звезды' : 'звёзд'}`, 'buy', { pid: p.id });
       }
       break;
@@ -607,6 +659,8 @@ function resolve(r, choice) {
     case 'STRELKA': {
       const owner = byId(r, q.owner), pr = r.props[q.cell];
       if (!owner || owner.bankrupt || !pr || pr.owner !== owner.id) break;
+      if (choice === 'fight' && q.noFight) choice = 'pay';
+      if (choice === 'crowd' && q.crowd) return startCrowd(r, p, owner, q);
       if (choice === 'fight') { strelka(r, p, owner, q); delay = 2600; }
       else {
         log(r, `${p.name} отдал долю $${q.rent}, хозяин — ${owner.name}`, 'rent', { pid: p.id });
@@ -625,32 +679,103 @@ function resolve(r, choice) {
       }
       p.jail = 0;
       log(r, `${p.name} отсидел ход`, 'jail', { pid: p.id });
+      if (has(p, 'sidelets')) { p.money += 60; p.auth = Math.min(AUTH_CAP, p.auth + 1); track(p); log(r, `Сиделец ${p.name} вышел с понтом: +$60 и авторитет`, 'goon', { pid: p.id }); }
       return endTurn(r);
   }
   afterAction(r, delay);
 }
 
-function strelka(r, p, owner, q) {
+function strelka(r, p, owner, q, crew = []) {
   const aRoll = d6(), oRoll = d6();
-  const aP = aRoll + power(p), oP = oRoll + power(owner);
+  const bonus = (eventOn(r, 'peredel') ? 2 : 0) + crew.length * CROWD_POWER;
+  const aP = aRoll + power(p) + bonus, oP = oRoll + defense(r, owner, q.cell);
   const win = aP > oP; // ничья — за хозяином
   heat(r, 2);
   p.st.strelkaTotal += 1;
-  r.fx = { type: 'strelka', seq: ++r.fxSeq, a: p.id, o: owner.id, aRoll, oRoll, aP, oP, win, cell: q.cell };
+  r.fx = { type: 'strelka', seq: ++r.fxSeq, a: p.id, o: owner.id, aRoll, oRoll, aP, oP, win, cell: q.cell, crew: crew.map((x) => x.id) };
+  // подмога: при победе каждому по $50 с хозяина, при сливе — каждый платит хозяину $40
+  crew.forEach((x) => {
+    if (win) { const g = pay(r, owner, 50, x); if (g) log(r, `${x.name} вписался в наезд и снял с ${owner.name} $${g}`, 'strelka', { pid: x.id }); }
+    else { const g = pay(r, x, 40, owner); if (g) log(r, `${x.name} вписался зря — отдал ${owner.name} $${g}`, 'strelka', { pid: x.id }); }
+  });
   const c = BOARD[q.cell];
   if (win) {
     const pr = r.props[q.cell];
-    pr.owner = p.id; pr.level = Math.max(0, pr.level - 1);
-    p.auth += 1; owner.auth = Math.max(0, owner.auth - 1);
+    pr.owner = p.id; pr.level = 0; // при отжиме все звёзды слетают
+    p.auth = Math.min(AUTH_CAP, p.auth + 1); owner.auth = Math.max(0, owner.auth - 1);
     p.st.strelkaWon += 1;
-    log(r, `Стрелка: ${p.name} (${aP}) против ${owner.name} (${oP}) — «${c.name}» отжата`, 'strelka', { pid: p.id });
+    // по понятиям: прежнему хозяину откуп — половина цены точки
+    const ransom = Math.round(c.price / 2 / 10) * 10;
+    const paidR = pay(r, p, ransom, owner);
+    log(r, `Стрелка: ${p.name} ${aP} против ${owner.name} ${oP} — «${c.name}» отжата, откуп $${paidR}, звёзды слетели`, 'strelka', { pid: p.id });
   } else {
-    const pen = q.rent * 2;
-    p.auth = Math.max(0, p.auth - 1);
-    if (p.goons > 0) p.goons -= 1;
-    log(r, `Стрелка: ${p.name} (${aP}) против ${owner.name} (${oP}) — слил, штраф $${pen}`, 'strelka', { pid: p.id });
+    const pen = q.rent * (has(p, 'advokat') ? 1 : 2); // адвокат отмазывает от двойного штрафа
+    if (p.goons > 0) p.goons -= 1; else p.auth = Math.max(0, p.auth - 1);
+    log(r, `Стрелка: ${p.name} ${aP} против ${owner.name} ${oP} — слил, штраф $${pen}`, 'strelka', { pid: p.id });
     const paid = pay(r, p, pen, owner);
     owner.st.rentIn += paid;
+  }
+}
+
+// ---------- Наезд толпой ----------
+// Если хозяин точки — самый богатый, можно позвать остальных вписаться. Каждый вписавшийся даёт +2 к силе.
+const CROWD_POWER = 2, CROWD_MS = 8000;
+function startCrowd(r, p, owner, q) {
+  const seq = ++r.fxSeq;
+  r.crowd = { seq, a: p.id, o: owner.id, cell: q.cell, q, joins: [], ms: CROWD_MS };
+  r.phase = 'CROWD'; r.pending = null;
+  log(r, `${p.name} зовёт братву на наезд против ${owner.name} — кто впишется?`, 'strelka', { pid: p.id });
+  // боты вписываются, если хозяин сильно впереди
+  others(r, p).filter((x) => x.bot && x !== owner).forEach((x) => {
+    if (rnd(100) < 65) setTimeout(() => safe(() => crowdJoin(r, x, seq)), T(1500 + rnd(4000)));
+  });
+  sync(r);
+  later(r, T(CROWD_MS), () => finishCrowd(r));
+}
+function crowdJoin(r, x, seq) {
+  const c = r.crowd;
+  if (!c || c.seq !== seq || x.bankrupt || x.id === c.a || x.id === c.o || c.joins.includes(x.id)) return;
+  c.joins.push(x.id);
+  sync(r);
+}
+function finishCrowd(r) {
+  const c = r.crowd;
+  if (!c) return;
+  r.crowd = null; clearTimer(r);
+  const p = byId(r, c.a), owner = byId(r, c.o);
+  if (!p || !owner || owner.bankrupt || p.bankrupt || !r.props[c.cell] || r.props[c.cell].owner !== owner.id) return afterAction(r);
+  const crew = c.joins.map((id) => byId(r, id)).filter((x) => x && !x.bankrupt);
+  log(r, crew.length ? `В наезд вписались: ${crew.map((x) => x.name).join(', ')} (+${crew.length * CROWD_POWER} к силе)` : 'Никто не вписался — идёт один', 'strelka', { pid: p.id });
+  r.phase = 'DECIDE';
+  strelka(r, p, owner, c.q, crew);
+  afterAction(r, 2600);
+}
+
+// ---------- События района и финал ----------
+const EVENTS = [
+  { id: 'rush', title: 'ЧАС ПИК', text: 'Весь круг доля со всех точек ×2.' },
+  { id: 'gold', title: 'ЖИРНЫЙ КРУГ', text: 'Весь круг Общак платит вдвое.' },
+  { id: 'peredel', title: 'ПЕРЕДЕЛ', text: 'Весь круг нападающий на стрелке получает +2 к силе.' },
+  { id: 'raid', title: 'ОБЛАВА', text: 'Розыск сразу +2. Осторожнее с покупками.', now: (r) => heat(r, 2) },
+  { id: 'default', title: 'ДЕФОЛТ', text: 'У всех сгорает 10% наличных — половина уходит в Общак.', now: (r) => active(r).forEach((p) => { if (!has(p, 'budka')) pay(r, p, Math.round(p.money * 0.1), null); }) },
+  { id: 'amnesty', title: 'АМНИСТИЯ', text: 'Все выходят из тюрьмы, розыск обнулён.', now: (r) => { r.players.forEach((p) => { p.jail = 0; }); r.heat = 0; r.omon = null; } },
+];
+const eventOn = (r, id) => !!(r.event && r.event.id === id && r.event.round === r.round);
+const finalStretch = (r) => !!(r.settings.rounds && r.round > r.settings.rounds - 3);
+function roundStart(r) {
+  r.event = null;
+  const R = r.settings.rounds;
+  if (R && r.round === R - 2) {
+    r.fx = { type: 'event', title: 'ПОСЛЕДНИЕ ДЕНЬКИ', text: 'Осталось 3 круга. Доля со всех точек ×1.5 до конца игры.', seq: ++r.fxSeq };
+    log(r, 'Последние деньки: 3 круга до конца, доля ×1.5', 'omon');
+    return;
+  }
+  if (r.round >= 3 && r.round % 3 === 0) {
+    const e = EVENTS[rnd(EVENTS.length)];
+    r.event = { id: e.id, title: e.title, text: e.text, round: r.round };
+    if (e.now) e.now(r);
+    r.fx = { type: 'event', title: e.title, text: e.text, seq: ++r.fxSeq };
+    log(r, `Событие района — ${e.title.toLowerCase()}: ${e.text}`, 'omon');
   }
 }
 
@@ -692,25 +817,27 @@ function omonStep(r) {
   }
 }
 function omonCheck(r) {
-  const hit = r.players.filter((p) => !p.bankrupt && p.pos === r.omon);
+  const hit = r.players.filter((p) => !p.bankrupt && p.pos === r.omon && !has(p, 'oboroten') && !has(p, 'budka'));
+  const wolf = active(r).find((p) => has(p, 'oboroten'));
   if (!hit.length) return;
   for (const p of hit) {
     if (p.goons > 0) { p.goons -= 1; log(r, `ОМОН накрыл ${p.name} — браток присел за него`, 'omon', { pid: p.id }); }
     else {
       const fine = has(p, 'reshala') ? Math.round(C.OMON_FINE / 2) : C.OMON_FINE;
-      log(r, `ОМОН повязал ${p.name}: штраф $${fine}`, 'omon', { pid: p.id }); pay(r, p, fine, null);
+      log(r, `ОМОН повязал ${p.name}: штраф $${fine}${wolf ? ` — половина ушла Оборотню ${wolf.name}` : ''}`, 'omon', { pid: p.id });
+      if (wolf) { pay(r, p, Math.floor(fine / 2), wolf); pay(r, p, Math.ceil(fine / 2), null); } else pay(r, p, fine, null);
     }
   }
   r.omon = null; r.heat = 0;
   log(r, 'Облава закончена, розыск сброшен', 'info');
 }
 
-// ---------- Смотрящий Дима Глок ----------
+// ---------- Смотрящий Глок ----------
 // Бандит, который держит район. Приходит между ходами и устраивает движ.
 const GLOK_LINES = [
   'Чё, пацаны, без меня веселитесь?', 'Район мой, правила мои.', 'Ничего личного, просто бизнес.',
   'Скучно мне что-то, братва…', 'Кто тут самый борзый?', 'Сюрприз, бродяги!', 'Я ненадолго. Наверное.',
-  'Расслабились? Зря.', 'Дима пришёл — Дима решает.',
+  'Расслабились? Зря.', 'Глок пришёл — Глок решает.',
 ];
 const victims = (r) => active(r).filter((p) => !has(p, 'reshala')); // Решалу Глок не трогает
 const richest = (r) => victims(r).slice().sort((a, b) => b.money - a.money)[0];
@@ -728,17 +855,17 @@ const GLOK_EVENTS = [
   { w: 3, f(r) {
     if (!victims(r).length) return null;
     victims(r).forEach((p) => hurt(p, pay(r, p, 25, null)));
-    return { title: 'НА ЧАЙ', text: 'Каждый заносит Диме по $25. Деньги ушли в Общак.' };
+    return { title: 'НА ЧАЙ', text: 'Каждый заносит Глоку по $25. Деньги ушли в Общак.' };
   } },
   { w: 2, f(r) {
     const p = active(r)[rnd(active(r).length)];
     p.money += 150; track(p);
-    return { title: 'ДИМА ДОБРЫЙ', text: `${p.name} получает $150. Просто так. Не привыкай.` };
+    return { title: 'ГЛОК ДОБРЫЙ', text: `${p.name} получает $150. Просто так. Не привыкай.` };
   } },
   { w: 2, f(r) {
     const t = two(r); if (!t) return null;
     [t[0].pos, t[1].pos] = [t[1].pos, t[0].pos];
-    return { title: 'ПЕРЕСАДКА', text: `${t[0].name} и ${t[1].name} поменялись местами. Дима так видит.` };
+    return { title: 'ПЕРЕСАДКА', text: `${t[0].name} и ${t[1].name} поменялись местами. Глок так видит.` };
   } },
   { w: 1, f(r) {
     const t = two(r); if (!t) return null;
@@ -750,7 +877,7 @@ const GLOK_EVENTS = [
   } },
   { w: 2, f(r) {
     active(r).forEach((p) => { p.pos = (p.pos - 3 + N) % N; });
-    return { title: 'ВСЕ НАЗАД!', text: 'Дима сказал отойти. Все отползают на 3 клетки назад.' };
+    return { title: 'ВСЕ НАЗАД!', text: 'Глок сказал отойти. Все отползают на 3 клетки назад.' };
   } },
   { w: 2, f(r) {
     const owned = Object.keys(r.props).filter((k) => !has(byId(r, r.props[k].owner), 'reshala'));
@@ -758,28 +885,28 @@ const GLOK_EVENTS = [
     const cell = +owned[rnd(owned.length)];
     r.sealed = { cell, until: r.round + 2 };
     const o = byId(r, r.props[cell].owner);
-    return { title: 'ТОЧКА ЗАКРЫТА', text: `«${cellName(cell)}» (${o ? o.name : '—'}) — Дима закрыл на 2 круга. Ренты нет.` };
+    return { title: 'ТОЧКА ЗАКРЫТА', text: `«${cellName(cell)}» (${o ? o.name : '—'}) — Глок закрыл на 2 круга. Ренты нет.` };
   } },
   { w: 1, f(r) {
     if (r.omon !== null) return null;
     r.heat = C.MAX_HEAT; r.omon = C.POLICE;
-    return { title: 'СДАЛ ВСЕХ', text: 'Дима позвонил кому надо. ОМОН уже выехал на район.' };
+    return { title: 'СДАЛ ВСЕХ', text: 'Глок позвонил кому надо. ОМОН уже выехал на район.' };
   } },
   { w: 2, f(r) {
     r.players.forEach((p) => { p.jail = 0; });
     r.heat = 0; r.omon = null;
-    return { title: 'ДИМА ПОРЕШАЛ', text: 'У Димы днюха: все на свободе, розыск сброшен.' };
+    return { title: 'ГЛОК ПОРЕШАЛ', text: 'У Глока днюха: все на свободе, розыск сброшен.' };
   } },
   { w: 2, f(r) {
     const p = victims(r).filter((x) => x.goons > 0).sort((a, b) => b.goons - a.goons)[0];
     if (!p) return null;
     p.goons -= 1;
-    return { title: 'ПЕРЕМАНИЛ', text: `Дима переманил братка у ${p.name}. «У меня платят лучше».` };
+    return { title: 'ПЕРЕМАНИЛ', text: `Глок переманил братка у ${p.name}. «У меня платят лучше».` };
   } },
   { w: 2, f(r) {
     if (r.pot < 100) return null;
     const x = r.pot; r.pot = 0;
-    return { title: 'ОБНЕС ОБЩАК', text: `Дима забрал весь джекпот Общака — $${x}. «Я же смотрящий».` };
+    return { title: 'ОБНЕС ОБЩАК', text: `Глок забрал весь джекпот Общака — $${x}. «Я же смотрящий».` };
   } },
   { w: 6, challenge: true },
 ];
@@ -789,13 +916,20 @@ function maybeGlok(r, cont) {
   const chance = process.env.GLOK_ALWAYS ? 100 : 16;
   if (!r.settings.glok || r.round < 2 || r.turnsSinceGlok < 4 || rnd(100) >= chance || active(r).length < 2) return cont();
   r.turnsSinceGlok = 0;
+  // с Будки Глок берёт своё при каждом приходе
+  active(r).filter((p) => has(p, 'budka')).forEach((p) => {
+    const t = Math.max(30, Math.round((netWorth(r, p) * 0.08) / 10) * 10);
+    const g = pay(r, p, t, null);
+    if (g) log(r, `Глок напомнил Будке, кто тут главный: −$${g}`, 'glok', { pid: p.id });
+  });
   const pool = GLOK_EVENTS.flatMap((e) => Array(e.w).fill(e));
   for (let i = 0; i < 6; i++) {
     const ev = pool[rnd(pool.length)];
     if (ev.challenge) return glokChallenge(r, pickGlokKind(r), cont);
-    const res = ev.f(r);
+    r._glok = true;
+    let res; try { res = ev.f(r); } finally { r._glok = false; }
     if (!res) continue;
-    log(r, `Дима Глок: ${res.title.toLowerCase()} — ${res.text}`, 'glok');
+    log(r, `Глок: ${res.title.toLowerCase()} — ${res.text}`, 'glok');
     r.fx = { type: 'glok', title: res.title, text: res.text, line: GLOK_LINES[rnd(GLOK_LINES.length)], seq: ++r.fxSeq };
     r.phase = 'GLOK'; r.pending = null;
     sync(r);
@@ -828,7 +962,7 @@ function glokChallenge(r, kind, cont) {
   const task = { kind, seq: ++r.fxSeq, prize, ms, taps: [], line: GLOK_LINES[rnd(GLOK_LINES.length)] };
   r.glokTask = task;
   r.phase = 'GLOK'; r.pending = null;
-  log(r, `Дима Глок: кто первый нажмёт — заберёт $${prize}`, 'glok');
+  log(r, `Глок: кто первый нажмёт — заберёт $${prize}`, 'glok');
   // боты не знают, что внутри, — жмут одинаково при любом раскладе
   active(r).filter((p) => p.bot).forEach((p) => {
     if (rnd(100) >= 70) return;
@@ -855,17 +989,18 @@ function finishGlok(r) {
   clearTimer(r);
   const first = byId(r, t.taps[0]), second = byId(r, t.taps[1]);
   const prize = t.prize;
+  r._glok = true;
   let title, text;
   if (!first) {
     title = 'НИКТО?!';
-    text = t.kind === 'real' ? `Все проспали. Дима забрал $${prize} себе.` : 'Никто не повёлся — а там была подстава. Скучные вы, братва.';
+    text = t.kind === 'real' ? `Все проспали. Глок забрал $${prize} себе.` : 'Никто не повёлся — а там была подстава. Скучные вы, братва.';
   } else switch (t.kind) {
     case 'real':
       first.money += prize; track(first);
-      title = 'ЧЕСТНО!'; text = `${first.name} самый шустрый: +$${prize}. Дима сегодня добрый.`; break;
+      title = 'ЧЕСТНО!'; text = `${first.name} самый шустрый: +$${prize}. Глок сегодня добрый.`; break;
     case 'fine':
       hurt(first, pay(r, first, prize, null));
-      title = 'ЭТО БЫЛА ПОДСТАВА'; text = `Халявы нет! ${first.name} платит Диме $${prize}. Ха-ха.`; break;
+      title = 'ЭТО БЫЛА ПОДСТАВА'; text = `Халявы нет! ${first.name} платит Глоку $${prize}. Ха-ха.`; break;
     case 'marked':
       first.money += prize; track(first);
       sendToJail(r, first);
@@ -883,9 +1018,10 @@ function finishGlok(r) {
     case 'double':
       hurt(first, pay(r, first, prize * 2, null));
       if (second) hurt(second, pay(r, second, prize, null));
-      title = 'ДВОЙНАЯ ПОДСТАВА'; text = `${first.name} платит $${prize * 2}${second ? `, ${second.name} — $${prize}` : ''}. Дима ржёт.`; break;
+      title = 'ДВОЙНАЯ ПОДСТАВА'; text = `${first.name} платит $${prize * 2}${second ? `, ${second.name} — $${prize}` : ''}. Глок ржёт.`; break;
   }
-  log(r, `Дима Глок: ${text}`, 'glok');
+  r._glok = false;
+  log(r, `Глок: ${text}`, 'glok');
   r.fx = { type: 'glok', title, text, line: '', seq: ++r.fxSeq, result: true };
   sync(r);
   const cont = r.glokCont; r.glokCont = null;
@@ -965,6 +1101,7 @@ function nextTurn(r) {
     const inf = r.settings.rounds ? 1 : r.round >= 40 ? 3 : r.round >= 25 ? 2 : 1;
     if (inf !== (r.inflation || 1)) { r.inflation = inf; log(r, `Беспредел: вся рента теперь ×${inf}`, 'omon'); }
     if (r.settings.rounds && r.round > r.settings.rounds) return finish(r, 'rounds');
+    roundStart(r);
   }
   r.turn = n;
   startTurn(r);
@@ -984,7 +1121,7 @@ function titles(r) {
   const add = (p, emoji, title, desc) => p && out.push({ pid: p.id, emoji, title, desc });
   add(best((p) => p.st.strelkaWon), 'sword', 'Отморозок', 'Больше всех отжал на стрелках');
   add(best((p) => p.st.rentIn, 50), 'house', 'Рантье', 'Больше всех собрал ренты');
-  add(best((p) => p.st.glok, 50), 'skull', 'Любимчик Глока', 'Больше всех пострадал от Димы');
+  add(best((p) => p.st.glok, 50), 'skull', 'Любимчик Глока', 'Больше всех пострадал от Глока');
   add(best((p) => p.st.casino, 2), 'slots', 'Лудоман', 'Не вылезал из казино');
   add(best((p) => p.st.jail, 2), 'c-tyurma', 'Сиделец', 'Чаще всех уезжал к ментам');
   add(best((p) => p.st.maxMoney, 0), 'coin', 'Олигарх', 'Самая толстая пачка за игру');
@@ -1045,8 +1182,7 @@ function botAct(r) {
     }
     case 'OCHKO': c = q.sum < 17 ? 'hit' : 'stand'; break;
     case 'STRELKA': {
-      const edge = q.my - q.his;
-      c = (edge >= 2 && p.money > q.rent * 2) || edge >= 4 ? 'fight' : 'pay';
+      c = q.noFight ? 'pay' : (q.chance >= 58 && p.money > q.rent * 2) || q.chance >= 75 ? 'fight' : q.crowd && q.chance >= 20 && rnd(2) ? 'crowd' : 'pay';
       break;
     }
     case 'JAIL': c = p.money > 500 ? 'pay' : 'wait'; break;
@@ -1069,10 +1205,18 @@ function startGame(r) {
   Object.assign(r, {
     status: 'PLAYING', turn: 0, props: {}, heat: 0, omon: null, pot: 0, round: 1, inflation: 1,
     winner: null, standings: null, titles: null, dice: null, lastMove: null, fx: null, deck: [],
-    sealed: null, glokTask: null, glokCont: null, turnsSinceGlok: 0, offers: [],
+    sealed: null, glokTask: null, glokCont: null, turnsSinceGlok: 0, offers: [], crowd: null, event: null,
   });
   r.players.filter((p) => p.boosted).forEach((p) => log(r, `${p.name} взял подъёмные: старт $${p.money}`, 'buy', { pid: p.id }));
   log(r, `Сходка началась! Первым ходит ${r.players[0].name}`, 'start');
+  // Тайный персонаж: иногда одному из игроков выпадает Будка
+  r.players.forEach((p) => { if (p.baseChar) { p.char = p.baseChar; p.baseChar = null; } });
+  if (process.env.BUDKA_ALWAYS || rnd(100) < 18) {
+    const p = r.players[rnd(r.players.length)];
+    p.baseChar = p.char; p.char = 'budka';
+    log(r, `Тайный персонаж! ${p.name} в этой партии — БУДКА. На него действует только Глок`, 'glok', { pid: p.id });
+    r.fx = { type: 'secret', pid: p.id, seq: ++r.fxSeq };
+  }
   startTurn(r);
 }
 
@@ -1194,7 +1338,7 @@ io.on('connection', (socket) => {
     const r = me.r;
     if (r.players.length >= C.MAX_PLAYERS) return err('Мест нет');
     const free = BOT_NAMES.filter((n) => !r.players.some((p) => p.name === 'Бот ' + n));
-    const keys = Object.keys(CHARS), freeChars = keys.filter((k) => !r.players.some((p) => p.char === k));
+    const keys = Object.keys(CHARS).filter((k) => !CHARS[k].secret), freeChars = keys.filter((k) => !r.players.some((p) => p.char === k));
     const ch = (freeChars.length ? freeChars : keys)[rnd((freeChars.length ? freeChars : keys).length)];
     r.players.push(makePlayer(r, 'Бот ' + (free[rnd(free.length)] || 'Х'), ch, null, true));
     sync(r);
@@ -1211,7 +1355,7 @@ io.on('connection', (socket) => {
   });
 
   on('setChar', ({ char }) => {
-    if (!me || me.r.status !== 'LOBBY' || !CHARS[char]) return;
+    if (!me || me.r.status !== 'LOBBY' || !CHARS[char] || CHARS[char].secret) return;
     if (!canUse(me.p, char)) return err(`${CHARS[char].name} открывается в магазине`);
     me.p.char = char;
     sync(me.r);
@@ -1219,7 +1363,7 @@ io.on('connection', (socket) => {
 
   on('settings', ({ rounds, glok, boosts }) => {
     if (!host() || me.r.status !== 'LOBBY') return;
-    if ([0, 10, 20, 30].includes(rounds)) me.r.settings.rounds = rounds;
+    if ([15, 20, 25].includes(rounds)) me.r.settings.rounds = rounds;
     if (typeof glok === 'boolean') me.r.settings.glok = glok;
     if (typeof boosts === 'boolean') { me.r.settings.boosts = boosts; if (!boosts) me.r.players.forEach((p) => { p.wantBoost = false; }); }
     sync(me.r);
@@ -1277,13 +1421,14 @@ io.on('connection', (socket) => {
     if (!host() || me.r.status !== 'GAMEOVER') return;
     const r = me.r;
     r.status = 'LOBBY'; r.phase = null; r.props = {}; r.winner = null; r.standings = null; r.titles = null;
-    r.players.forEach((p) => Object.assign(p, freshStats()));
+    r.players.forEach((p) => { Object.assign(p, freshStats()); if (p.baseChar) { p.char = p.baseChar; p.baseChar = null; } });
     log(r, 'Новая сходка — ждём братву', 'start');
     sync(r);
   });
 
   const myTurn = () => me && me.r.status === 'PLAYING' && cur(me.r) === me.p;
   on('glok', ({ seq }) => { if (me && me.r.status === 'PLAYING') glokTap(me.r, me.p, seq); });
+  on('crowd', ({ seq }) => { if (me && me.r.status === 'PLAYING') crowdJoin(me.r, me.p, seq); });
   on('roll', () => { if (myTurn() && me.r.phase === 'ROLL') doRoll(me.r); });
   on('decide', ({ choice }) => { if (myTurn() && me.r.phase === 'DECIDE') resolve(me.r, String(choice)); });
   on('offer', (d) => {

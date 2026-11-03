@@ -30,7 +30,7 @@
 
   const C = {
     N: 20, START_MONEY: 1000, SALARY: 120, GOON_PRICE: 60, MAX_GOONS: 3,
-    MAX_LEVEL: 3, MAX_HEAT: 5, OMON_FINE: 150, BAIL: 60, POLICE: 15, JAIL: 5,
+    MAX_LEVEL: 3, MAX_HEAT: 5, CATCHUP: 80, OMON_FINE: 150, BAIL: 60, POLICE: 15, JAIL: 5,
     HOP_MS: 240, MAX_PLAYERS: 6,
   };
 
@@ -50,6 +50,7 @@
     'char-advokat': { kind: 'char', char: 'advokat', price: 300 },
     'char-reshala': { kind: 'char', char: 'reshala', price: 400 },
     'char-shuler': { kind: 'char', char: 'shuler', price: 300 },
+    'char-oboroten': { kind: 'char', char: 'oboroten', price: 350 },
     // рамки аватарки — видны в лобби, в игре и в топе
     'frame-gold': { kind: 'frame', name: 'Золотая', price: 150 },
     'frame-neon': { kind: 'frame', name: 'Неон', price: 200 },
@@ -66,6 +67,11 @@
     'title-otmoroz': { kind: 'title', name: 'Отморозок', price: 150 },
     'title-glok': { kind: 'title', name: 'Кент Глока', price: 200 },
     'title-legend': { kind: 'title', name: 'Легенда района', price: 600 },
+    // темы оформления — видит только владелец
+    'theme-piter': { kind: 'theme', name: 'Бандитский Петербург', price: 100 },
+    'theme-zona': { kind: 'theme', name: 'Зона', price: 150 },
+    'theme-casino': { kind: 'theme', name: 'Казино Рояль', price: 250 },
+    'theme-neon': { kind: 'theme', name: 'Неон', price: 300 },
   };
   // подарки — тратятся при отправке
   const GIFTS = [
