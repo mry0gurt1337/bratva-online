@@ -37,15 +37,29 @@ window.Olympus = (() => {
   const fmt = (n) => Number(n).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
   const multCls = (v) => (v >= 100 ? 'm-red' : v >= 20 ? 'm-purple' : v >= 8 ? 'm-blue' : 'm-green');
 
+  // Сфера Глока: стеклянный шар с молнией внутри и кольцом-орбитой. Цвет — по силе множителя.
+  const ORB_C = { 'm-green': ['#d1fae5', '#10b981', '#022c22'], 'm-blue': ['#dbeafe', '#3b82f6', '#0b1d4d'], 'm-purple': ['#f3e8ff', '#a855f7', '#2e0a4f'], 'm-red': ['#ffe4e6', '#f43f5e', '#4c0519'] };
+  const ORB_DEFS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>${Object.entries(ORB_C).map(([k, [l, m, d]]) => `
+    <radialGradient id="og-${k}" cx="38%" cy="32%" r="70%"><stop offset="0" stop-color="${l}"/><stop offset=".35" stop-color="${m}"/><stop offset="1" stop-color="${d}"/></radialGradient>`).join('')}
+    <radialGradient id="og-shine" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient></defs></svg>`;
+  function orbHTML(v) {
+    const c = multCls(v);
+    return `<span class="oy-orb2 ${c}"><svg viewBox="0 0 100 100" class="oy-orb-svg">
+      <ellipse class="oy-orbit" cx="50" cy="50" rx="47" ry="16" fill="none" stroke="${ORB_C[c][0]}" stroke-width="2.2" stroke-dasharray="6 9" opacity=".75"/>
+      <circle cx="50" cy="50" r="36" fill="url(#og-${c})"/>
+      <path class="oy-bolt-in" d="M56 18 L38 52 L51 52 L42 82 L64 44 L51 44 Z" fill="#fff9d6" opacity=".85"/>
+      <circle cx="50" cy="50" r="36" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="1.6"/>
+      <ellipse cx="38" cy="32" rx="13" ry="8" fill="url(#og-shine)" transform="rotate(-28 38 32)"/></svg><b>×${v}</b></span>`;
+  }
   function sym(s) {
-    if (s[0] === 'M') { const v = +s.slice(1); return `<span class="oy-orb ${multCls(v)}"><b>×${v}</b></span>`; }
+    if (s[0] === 'M') return orbHTML(+s.slice(1));
     if (GEM[s]) return gem(s);
     return `<img class="oy-img ${s === 'S' ? 'oy-scat' : ''}" src="${IMG[s]}" alt="" draggable="false">`;
   }
 
   // Каркас автомата. Возвращает объект для анимации.
   function mount(host, opts = {}) {
-    host.innerHTML = `<div class="oy ${opts.compact ? 'compact' : ''}">
+    host.innerHTML = `${ORB_DEFS}<div class="oy ${opts.compact ? 'compact' : ''}">
       <div class="oy-top"><div class="oy-glok"><span class="oy-glok-pic">${opts.glok || ''}</span><i class="oy-bolt"></i></div>
         <div class="oy-title"><b>BRATVA</b><span>OLYMPUS</span></div>
         <div class="oy-acc" hidden><small>множитель</small><b>×0</b></div></div>
@@ -61,13 +75,50 @@ window.Olympus = (() => {
     return v;
   }
   // Рисуем поле. from[i] — с какой высоты (в клетках) падает символ i; null — без анимации.
-  function draw(v, grid, from, speed = 1) {
+  // tease — номер столбца, после которого остальные падают медленно (выпал 3-й Общак)
+  function draw(v, grid, from, speed = 1, tease = -1) {
+    const extra = (c) => (tease >= 0 && c > tease ? 520 * (c - tease) : 0);
     v.grid.innerHTML = grid.map((s, i) => {
       const c = Math.floor(i / ROWS), r = i % ROWS;
       const f = from ? from[i] : 0;
-      return `<div class="oy-cell ${f ? 'drop' : ''}" data-i="${i}" style="grid-column:${c + 1};grid-row:${r + 1};--from:${f}; --d:${((c * 40 + (ROWS - r) * 18) / speed).toFixed(0)}ms; --t:${(380 / speed).toFixed(0)}ms">${sym(s)}</div>`;
-    }).join('');
-    v.cells = [...v.grid.children];
+      return `<div class="oy-cell ${f ? 'drop' : ''} ${tease >= 0 && c > tease ? 'slow' : ''}" data-i="${i}" style="grid-column:${c + 1};grid-row:${r + 1};--from:${f}; --d:${((c * 70 + (ROWS - r) * 22) / speed + extra(c)).toFixed(0)}ms; --t:${((tease >= 0 && c > tease ? 620 : 400) / speed).toFixed(0)}ms">${sym(s)}</div>`;
+    }).join('') + (tease >= 0 ? Array.from({ length: COLS - tease - 1 }, (_, k) => `<i class="oy-colglow" style="grid-column:${tease + k + 2};grid-row:1 / ${ROWS + 1};--d:${(((tease + k + 1) * 70) / speed + extra(tease + k + 1) - 300).toFixed(0)}ms"></i>`).join('') : '');
+    v.cells = [...v.grid.querySelectorAll('.oy-cell')];
+    return tease >= 0 ? extra(COLS - 1) : 0;
+  }
+  function teaseCol(grid) { // столбец, где появился 3-й Общак (если всего их 3+, а 4-й ещё может выпасть)
+    let n = 0;
+    for (let c = 0; c < COLS; c++) { for (let r = 0; r < ROWS; r++) if (grid[c * ROWS + r] === 'S') n++; if (n >= 3) return c < COLS - 1 ? c : -1; }
+    return -1;
+  }
+  const rectIn = (el, host) => { const r = el.getBoundingClientRect(), h = host.getBoundingClientRect(); return { x: r.left - h.left + r.width / 2, y: r.top - h.top + r.height / 2, w: r.width }; };
+  // фишка с суммой над группой выигравших символов, потом летит в счётчик выигрыша
+  function chip(v, cells, text, big) {
+    const host = v.root, pts = cells.map((el) => rectIn(el, host));
+    const x = pts.reduce((s, p) => s + p.x, 0) / pts.length, y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const c = document.createElement('div'); c.className = 'oy-chip' + (big ? ' big' : ''); c.textContent = text;
+    c.style.left = x + 'px'; c.style.top = y + 'px';
+    host.appendChild(c);
+    const t = rectIn(v.win, host);
+    setTimeout(() => { c.classList.add('fly'); c.style.transform = `translate(calc(-50% + ${t.x - x}px), calc(-50% + ${t.y - y}px)) scale(.5)`; }, 520);
+    setTimeout(() => c.remove(), 1100);
+  }
+  // сфера отрывается от поля и летит в цель (счётчик множителя или выигрыша)
+  function flyOrb(v, el, v2, target) {
+    return new Promise((ok) => {
+      const host = v.root, a = rectIn(el, host), b = rectIn(target, host);
+      const f = document.createElement('div'); f.className = 'oy-flyorb'; f.innerHTML = orbHTML(v2);
+      f.style.cssText = `left:${a.x}px;top:${a.y}px;width:${a.w}px;height:${a.w}px`;
+      host.appendChild(f);
+      el.classList.add('orb-gone');
+      requestAnimationFrame(() => requestAnimationFrame(() => { f.style.transform = `translate(-50%,-50%) translate(${b.x - a.x}px, ${b.y - a.y}px) scale(.45)`; f.style.opacity = '.2'; }));
+      setTimeout(() => { f.remove(); ok(); }, 560);
+    });
+  }
+  function stamp(v, target, text) {
+    const host = v.root, p = rectIn(target, host), st = document.createElement('div');
+    st.className = 'oy-stamp'; st.textContent = text; st.style.left = p.x + 'px'; st.style.top = p.y - Math.max(26, p.w * 0.12) + 'px'; // над счётчиком, не на цифрах
+    host.appendChild(st); setTimeout(() => st.remove(), 900);
   }
   // Высоты падения для первого поля: всё сверху
   const allFrom = () => Array.from({ length: COLS * ROWS }, () => ROWS + 1);
@@ -128,11 +179,38 @@ window.Olympus = (() => {
     const f = (now) => { const k = Math.min(1, (now - t0) / ms); el.textContent = fmt(Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3)))); if (k < 1) requestAnimationFrame(f); };
     requestAnimationFrame(f);
   }
+  function zapAt(v, el) {
+    const host = v.root, p = rectIn(el, host), z = document.createElement('div');
+    z.className = 'oy-zap at'; z.style.left = p.x + 'px'; z.style.height = p.y + 30 + 'px';
+    z.innerHTML = '<svg viewBox="0 0 100 300" preserveAspectRatio="none"><path d="M60 0 L35 120 L58 120 L30 300 L80 100 L55 100 L75 0Z"/></svg>';
+    host.appendChild(z); host.classList.add('oy-flash'); setTimeout(() => { z.remove(); host.classList.remove('oy-flash'); }, 600);
+  }
   function lightning(v) {
     const z = document.createElement('div'); z.className = 'oy-zap';
     z.innerHTML = '<svg viewBox="0 0 100 300" preserveAspectRatio="none"><path d="M60 0 L35 120 L58 120 L30 300 L80 100 L55 100 L75 0Z"/></svg>';
-    v.root.querySelector('.oy-frame').appendChild(z); v.root.classList.add('flash');
-    setTimeout(() => { z.remove(); v.root.classList.remove('flash'); }, 600);
+    v.root.querySelector('.oy-frame').appendChild(z); v.root.classList.add('oy-flash');
+    setTimeout(() => { z.remove(); v.root.classList.remove('oy-flash'); }, 600);
+  }
+  // Заставка бонуса: Общаки слетаются в центр, Глок, лучи, счётчик спинов набегает до 15
+  async function bonusIntro(v, scats, sup) {
+    const host = v.root, frame = host.querySelector('.oy-frame'), c = rectIn(frame, host);
+    scats.forEach((el, k) => {
+      const a = rectIn(el, host), f = document.createElement('div'); f.className = 'oy-flyscat'; f.innerHTML = el.innerHTML;
+      f.style.cssText = `left:${a.x}px;top:${a.y}px;width:${a.w}px;height:${a.w}px`; host.appendChild(f);
+      setTimeout(() => { f.style.transform = `translate(-50%,-50%) translate(${c.x - a.x}px, ${c.y - a.y}px) scale(1.6) rotate(${k % 2 ? 20 : -20}deg)`; f.style.opacity = '0'; }, 60 + k * 90);
+      setTimeout(() => f.remove(), 900 + k * 90);
+    });
+    await sleep(700);
+    const b = document.createElement('div'); b.className = 'oy-intro' + (sup ? ' super' : '');
+    b.innerHTML = `<div class="oy-rays"></div><div class="oy-intro-in"><div class="oy-intro-glok">${v.glok.querySelector('.oy-glok-pic').innerHTML}</div>
+      <small>${sup ? 'Бонус «Беспредел»' : 'Общак вскрыт'}</small><b class="oy-intro-n">0</b><span>${sup ? 'спинов · сфера в каждом' : 'бесплатных спинов'}</span><em>множитель копится весь бонус</em></div>`;
+    host.appendChild(b);
+    S().play('victory'); S().vibe([80, 50, 160]);
+    const n = b.querySelector('.oy-intro-n');
+    for (let k = 1; k <= 15; k++) { await sleep(55); n.textContent = k; if (k % 3 === 0) S().play('tick', 0.4); }
+    n.classList.add('done'); fireworks(b, sup ? 8 : 5);
+    await sleep(1500);
+    b.classList.add('out'); await sleep(300); b.remove();
   }
   async function banner(v, title, sub, cls = '') {
     const b = document.createElement('div'); b.className = 'oy-banner ' + cls;
@@ -143,19 +221,29 @@ window.Olympus = (() => {
   async function spinAnim(v, s, o) {
     const sp = o.speed || 1, bet = o.bet || 1;
     v.tumble.hidden = true;
-    draw(v, s.first, allFrom(), sp);
+    const tc = o.fs ? -1 : teaseCol(s.first);
+    const slowMs = draw(v, s.first, allFrom(), sp, tc);
     S().play('dice', 0.4);
-    setTimeout(() => { shake(v); S().play('fight', 0.25); }, 520 / sp);
+    // каждый столбец приземляется со своим стуком
+    for (let c = 0; c < COLS; c++) setTimeout(() => { S().play('tick', 0.25); if (c === COLS - 1) shake(v); }, (c * 70) / sp + (tc >= 0 && c > tc ? 520 * (c - tc) : 0) + 380 / sp);
+    if (tc >= 0) { // интрига: Общаки уже на поле светятся, остальные столбцы падают медленно
+      setTimeout(() => { v.root.classList.add('tease'); v.cells.forEach((el, i) => s.first[i] === 'S' && Math.floor(i / ROWS) <= tc && el.classList.add('tease')); S().play('siren', 0.25); }, ((tc + 1) * 70) / sp + 380 / sp);
+    }
     // Общаки и сферы при приземлении вспыхивают
-    setTimeout(() => s.first.forEach((x, i) => { if ((x === 'S' || x[0] === 'M') && v.cells[i]) { v.cells[i].classList.add('land'); sparks(v.cells[i], 8, x === 'S' ? '#7ef0a8' : '#c084fc'); } }), 650 / sp);
-    await sleep(900 / sp);
-    // три Общака — подсвечиваем и тянем паузу
-    const sc = s.first.filter((x) => x === 'S').length;
-    if (sc === 3 && !o.fs) { v.cells.forEach((el, i) => s.first[i] === 'S' && el.classList.add('tease')); v.root.classList.add('tease'); S().play('tick'); await sleep(900); v.root.classList.remove('tease'); }
+    s.first.forEach((x, i) => {
+      if (x !== 'S' && x[0] !== 'M') return;
+      const c = Math.floor(i / ROWS), at = (c * 70) / sp + (tc >= 0 && c > tc ? 520 * (c - tc) : 0) + 400 / sp;
+      setTimeout(() => { if (v.cells[i]) { v.cells[i].classList.add('land'); sparks(v.cells[i], 10, x === 'S' ? '#7ef0a8' : '#c084fc'); S().play(x === 'S' ? 'card' : 'tick', 0.5); } }, at);
+    });
+    await sleep(900 / sp + slowMs);
+    v.root.classList.remove('tease');
+    v.grid.querySelectorAll('.oy-colglow').forEach((g) => g.remove());
     let run = 0;
     let prev = s.first;
     for (const st of s.steps) {
       st.remove.forEach((i) => v.cells[i] && v.cells[i].classList.add('win'));
+      // над каждой группой — сколько она принесла
+      st.parts.forEach((p) => { const cells = st.remove.filter((i) => prev[i] === p.s).map((i) => v.cells[i]).filter(Boolean); if (cells.length) chip(v, cells, '+' + fmt(Math.round(p.p * bet * 100) / 100), p.p >= 5); });
       run += st.pay;
       v.tumble.hidden = false; v.tumble.innerHTML = `${st.parts.map((p) => `<span>${p.n}× ${NAMES[p.s]}</span>`).join('')}<b>${fmt(st.pay * bet)}</b>`;
       countUp(v.win, (run - st.pay) * bet, run * bet, 500 / sp); v.msg.textContent = st.pay >= 5 ? 'Жирно!' : 'Каскад';
@@ -171,12 +259,34 @@ window.Olympus = (() => {
       prev = st.grid;
       await sleep(620 / sp);
     }
-    // сферы: летят в счётчик, если был выигрыш
+    // Удар Глока: поле темнеет, молния бьёт в клетку — там появляется сфера
+    if (s.strike && s.strike.length) {
+      v.root.classList.add('strike'); v.glok.classList.add('throw'); S().play('glok', 0.8);
+      v.msg.textContent = 'УДАР ГЛОКА';
+      await sleep(380 / sp);
+      for (const m of s.strike) {
+        const el = v.cells[m.i]; if (!el) continue;
+        zapAt(v, el); S().play('boom', 0.6); S().vibe([30, 20, 80]); shake(v, true);
+        el.innerHTML = orbHTML(m.v); el.classList.remove('land'); void el.offsetWidth; el.classList.add('land', 'strike-in');
+        blast(v, el, true); sparks(el, 14, '#c084fc');
+        await sleep(420 / sp);
+      }
+      v.glok.classList.remove('throw'); v.root.classList.remove('strike');
+    }
+    // сферы: каждая летит в счётчик и ставит штамп «×N»
     if (s.win && s.mults.length) {
-      v.glok.classList.add('throw'); S().play('glok', 0.7); lightning(v); say(v, 'mult'); shake(v, true);
-      s.mults.forEach((m) => v.cells[m.i] && blast(v, v.cells[m.i], true));
-      for (const m of s.mults) { const el = v.cells[m.i]; if (el) el.classList.add('orb-hit'); }
-      await sleep(700 / sp);
+      v.glok.classList.add('throw'); S().play('glok', 0.7); lightning(v); say(v, 'mult');
+      const target = o.fs ? v.acc : v.win;
+      let sum = 0;
+      for (const m of s.mults) {
+        const el = v.cells[m.i]; if (!el) continue;
+        el.classList.add('orb-pulse'); await sleep(140 / sp);
+        await flyOrb(v, el, m.v, target);
+        sum += m.v; stamp(v, target, '×' + m.v); S().play('cash', 0.5); S().vibe(20);
+        if (!o.fs) { v.msg.textContent = `×${sum}`; } else { target.classList.remove('up'); void target.offsetWidth; target.classList.add('up'); }
+      }
+      shake(v, true);
+      await sleep(250 / sp);
       v.glok.classList.remove('throw');
       return { win: run, mult: s.multSum };
     }
@@ -185,20 +295,20 @@ window.Olympus = (() => {
 
   async function bigWin(host, x, bet) {
     if (x < 20) return;
-    const lvl = x >= 100 ? ['БЕСПРЕДЕЛ', 'epic'] : x >= 50 ? ['ОГРОМНЫЙ ВЫИГРЫШ', 'mega'] : ['КРУПНЫЙ ВЫИГРЫШ', 'big'];
+    const lvl = x >= 1000 ? ['КОРОЛЬ РАЙОНА', 'legend'] : x >= 250 ? ['ЛЕГЕНДАРНЫЙ ЗАНОС', 'legend'] : x >= 100 ? ['БЕСПРЕДЕЛ', 'epic'] : x >= 50 ? ['ОГРОМНЫЙ ВЫИГРЫШ', 'mega'] : ['КРУПНЫЙ ВЫИГРЫШ', 'big'];
     const el = document.createElement('div');
     el.className = `oy-big ${lvl[1]}`;
     el.innerHTML = `<div class="oy-rays"></div><div class="oy-big-in"><small>×${fmt(x)}</small><b>${lvl[0]}</b><em>0</em></div>`;
     host.appendChild(el);
     S().play('victory'); S().vibe([60, 40, 160]);
-    const em = el.querySelector('em'), total = x * bet, t0 = performance.now(), dur = 1800;
+    const em = el.querySelector('em'), total = x * bet, t0 = performance.now(), dur = x >= 250 ? 3200 : x >= 100 ? 2500 : 1800;
     await new Promise((ok) => {
       const f = (now) => { const k = Math.min(1, (now - t0) / dur); em.textContent = fmt(Math.round(total * (1 - Math.pow(1 - k, 3)))); if (k < 1) requestAnimationFrame(f); else ok(); };
       requestAnimationFrame(f);
     });
     if (window.BR && window.BR.coinBurst) window.BR.coinBurst(el, 40);
-    fireworks(el, x >= 100 ? 14 : 8);
-    await sleep(1400);
+    fireworks(el, x >= 250 ? 22 : x >= 100 ? 14 : 8);
+    await sleep(x >= 250 ? 2600 : 1400);
     el.classList.add('out'); await sleep(300); el.remove();
   }
 
@@ -209,10 +319,11 @@ window.Olympus = (() => {
     const b = await spinAnim(v, r.base, { speed: sp, bet });
     let shown = b.win;
     if (b.mult) {
-      v.acc.hidden = false; v.acc.querySelector('b').textContent = '×' + b.mult;
       shown = b.win * b.mult;
-      v.win.textContent = fmt(shown * bet); v.msg.textContent = `×${b.mult} от Глока`;
-      S().play('casino-win'); await sleep(900 / sp);
+      v.msg.textContent = `${fmt(b.win * bet)} × ${b.mult}`;
+      countUp(v.win, b.win * bet, shown * bet, 900 / sp);
+      v.win.classList.remove('pump'); void v.win.offsetWidth; v.win.classList.add('pump');
+      S().play('casino-win'); await sleep(1100 / sp);
     }
     if (r.base.scatPay) { shown += r.base.scatPay; v.win.textContent = fmt(shown * bet); }
     if (r.fs) {
@@ -221,7 +332,8 @@ window.Olympus = (() => {
       const sc = v.cells.filter((el, i) => r.base.end[i] === 'S'); sc.forEach((el) => el.classList.add('scat-hit'));
       S().play('glok'); S().vibe([100, 60, 100]);
       v.msg.textContent = 'ОБЩАК!';
-      await banner(v, '15 БЕСПЛАТНЫХ СПИНОВ', 'множитель копится весь бонус', 'fs');
+      if (r.fs.super) v.root.classList.add('super');
+      await bonusIntro(v, sc, !!r.fs.super);
       let left = 15, total = shown;
       v.fs.hidden = false; v.acc.hidden = false;
       const fsp = sp * (o.fsSpeed || 1.6);
@@ -234,8 +346,8 @@ window.Olympus = (() => {
         if (s.extra) { left += s.extra; v.fs.querySelector('b').textContent = left; v.msg.textContent = `+${s.extra} спинов`; S().play('casino-win'); await banner(v, `+${s.extra} СПИНОВ`, '', 'fs'); }
         if (res.win && s.acc) { v.msg.textContent = `×${s.acc}`; await sleep(300); }
       }
-      v.root.classList.remove('bonus');
-      await banner(v, 'БОНУС ОКОНЧЕН', `выигрыш ×${fmt(r.fs.total)}`, 'end');
+      v.root.classList.remove('bonus', 'super');
+      await banner(v, 'БОНУС ОКОНЧЕН', `выигрыш ${fmt(Math.round(r.fs.total * bet))} · ×${fmt(r.fs.total)}`, 'end');
     }
     v.win.textContent = r.x ? fmt(Math.round(r.x * bet)) : '';
     v.msg.textContent = r.x ? (r.capped ? 'Максимальный выигрыш!' : 'Выигрыш') : 'Мимо. Ещё разок?';
@@ -263,11 +375,11 @@ window.Olympus = (() => {
         <button class="oy-small ${ante ? 'on' : ''}" id="oyAnte">${B.ic('bolt')}<span>Ставка+</span></button>
         <button class="oy-small" id="oyAuto">${B.ic('dice')}<span>Авто 10</span></button>
       </div>
-      <button class="oy-buy" id="oyBuy"><span>Купить бонус</span><b id="oyBuyV"></b><small>15 бесплатных спинов сразу</small></button>
-      <div class="dk-note oy-note">Играем на зелёные «бабки» — их нельзя купить. Ставка+ (+25%) — бонус выпадает вдвое чаще. Максимальный выигрыш ×15 000.</div>
+      <button class="oy-buy" id="oyBuy"><span>Купить бонус</span><b id="oyBuyV"></b><small>15 спинов сразу · или «Беспредел»</small></button>
+      <div class="dk-note oy-note">Играем на зелёные «бабки» — их нельзя купить. Ставка+ (+25%) — бонус выпадает почти втрое чаще. Максимальный выигрыш ×25 000.</div>
     </section>`;
     const v = mount(document.getElementById('oyHost'), { glok: B.avatar({ char: 'glok' }) });
-    const BUY = 72;
+    const BUY = 72, SUPER = 215;
     const upd = () => { document.getElementById('oyBetV').innerHTML = `<i class="bucks"></i>${fmt(BETS[betI] * (ante ? 1.25 : 1))}`; document.getElementById('oyBuyV').innerHTML = `<i class="bucks"></i>${fmt(BETS[betI] * BUY)}`; };
     upd();
     document.getElementById('oyBack').onclick = () => { auto = 0; if (!busy) B.home(); else B.toast('Дождись конца спина'); };
@@ -278,7 +390,7 @@ window.Olympus = (() => {
     document.querySelector('.oy-bet div').onclick = () => {
       if (busy) return;
       const m = B.modal(`<div class="oy-bets"><h2>Ставка</h2><p class="hint">На счету ${fmt(bank)} бабок</p>
-        <div class="oy-bgrid">${BETS.map((x, i) => `<button data-b="${i}" class="${i === betI ? 'on' : ''}" ${bank != null && x > bank ? 'disabled' : ''}><b>${fmt(x)}</b><small>до ${x * 15000 >= 1e6 ? fmt(x * 15000 / 1e6) + ' млн' : fmt(x * 15000)}</small></button>`).join('')}</div>
+        <div class="oy-bgrid">${BETS.map((x, i) => `<button data-b="${i}" class="${i === betI ? 'on' : ''}" ${bank != null && x > bank ? 'disabled' : ''}><b>${fmt(x)}</b><small>до ${x * 25000 >= 1e6 ? fmt(x * 25000 / 1e6) + ' млн' : fmt(x * 25000)}</small></button>`).join('')}</div>
         <div class="oy-bq"><button data-q="min">Мин</button><button data-q="half">Средняя</button><button data-q="max">Макс по банку</button></div></div>`);
       m.querySelectorAll('[data-b]').forEach((x) => x.onclick = () => { betI = +x.dataset.b; upd(); S().play('tick'); m.closeModal(); });
       m.querySelectorAll('[data-q]').forEach((x) => x.onclick = () => {
@@ -289,7 +401,7 @@ window.Olympus = (() => {
         upd(); S().play('tick'); m.closeModal();
       });
     };
-    const spinOnce = async (buy = false) => {
+    const spinOnce = async (buy = false) => { // buy: false | true | 'super'
       if (busy) return false;
       busy = true; document.getElementById('oySpin').classList.add('busy');
       let d;
@@ -304,9 +416,13 @@ window.Olympus = (() => {
     document.getElementById('oySpin').onclick = () => spinOnce();
     document.getElementById('oyBuy').onclick = () => {
       if (busy) return;
-      const price = BETS[betI] * BUY;
-      if (bank != null && bank < price) return B.toast(`Не хватает бабок: бонус стоит ${fmt(price)}`);
-      if (confirm(`Купить бонус за ${fmt(price)} бабок? Сразу 15 бесплатных спинов при ставке ${fmt(BETS[betI])}.`)) spinOnce(true);
+      const bet = BETS[betI], p1 = bet * BUY, p2 = bet * SUPER;
+      const card = (id, title, price, text, cls) => `<button class="oy-bcard ${cls}" data-buy="${id}" ${bank != null && bank < price ? 'disabled' : ''}>
+        <span class="oy-bc-orb">${id === 'super' ? orbHTML(100) : sym('S')}</span><b>${title}</b><small>${text}</small><em><i class="bucks"></i>${fmt(price)}</em></button>`;
+      const m = B.modal(`<div class="oy-buym"><h2>Купить бонус</h2><p class="hint">Ставка ${fmt(bet)} · на счету ${fmt(bank)} бабок</p>
+        <div class="oy-bcards">${card('fs', 'Бонус', p1, '15 бесплатных спинов, множитель копится', '')}${card('super', 'Беспредел', p2, '15 спинов, в каждом гарантирована сфера Глока', 'sup')}</div>
+        <p class="hint">Только за бабки. Отдача покупок около 95%.</p></div>`);
+      m.querySelectorAll('[data-buy]').forEach((x) => x.onclick = () => { m.closeModal(); spinOnce(x.dataset.buy === 'super' ? 'super' : true); });
     };
     document.getElementById('oyAuto').onclick = async (e) => {
       if (auto) { auto = 0; e.currentTarget.classList.remove('on'); return; }
@@ -319,13 +435,14 @@ window.Olympus = (() => {
   function paytable() {
     const B = window.BR;
     const P = [['crown', [10, 25, 50]], ['chain', [2.5, 10, 25]], ['merin', [2, 5, 15]], ['pidjak', [1.5, 2, 12]], ['konyak', [1, 1.5, 10]], ['pager', [0.8, 1.2, 8]], ['t', [0.5, 1, 5]], ['k', [0.4, 0.9, 4]], ['d', [0.25, 0.75, 2]]];
-    const k = 1.72;
+    const k = 1.14;
     B.modal(`<div class="rules oy-pay"><h2>Bratva Olympus</h2>
       <p>Поле 6×5 без линий. Выигрыш — 8 и больше одинаковых символов в любом месте. Выигравшие взрываются, сверху падают новые — каскад идёт, пока есть выигрыш.</p>
       <div class="oy-ptab"><div class="h"><span></span><b>8–9</b><b>10–11</b><b>12+</b></div>${P.map(([s, v]) => `<div><span class="pt-s">${sym(s)}</span>${v.map((x) => `<b>×${+(x * k).toFixed(2)}</b>`).join('')}</div>`).join('')}</div>
       <p><b>Сферы Глока</b> ×2…×1000 падают на поле. Если спин выиграл — все сферы складываются и умножают выигрыш.</p>
+      <p><b>Удар Глока</b> — если спин выиграл, а сфер нет, Глок иногда сам бросает на поле одну-две сферы.</p>
       <p><b>Общак</b> (пачка денег) — 4 и больше в любом месте: 15 бесплатных спинов. В бонусе множитель копится на весь бонус, 3 Общака — ещё +5 спинов. За 4/5/6 Общаков сразу ×3/×5/×100.</p>
-      <p><b>Купить бонус</b> — ×72 от ставки, сразу 15 бесплатных спинов. Только за бабки.</p><p>Ставка+ стоит на 25% дороже — бонус выпадает примерно вдвое чаще. Отдача около 95%. Максимум ×15 000.</p></div>`);
+      <p><b>Купить бонус</b> — ×72 от ставки, сразу 15 бесплатных спинов. <b>Беспредел</b> — ×215: те же 15 спинов, но в каждом гарантирована сфера Глока, а крупные сферы падают чаще. Только за бабки.</p><p>Ставка+ стоит на 25% дороже — бонус выпадает почти втрое чаще. Отдача около 95%. Максимум ×25 000.</p></div>`);
   }
   return { mount, animate, show, sym };
 })();

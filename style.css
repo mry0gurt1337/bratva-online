@@ -1732,7 +1732,7 @@ body.shake-big .screen.game { animation: shkBig .8s cubic-bezier(.36,.07,.19,.97
 .oy-zap { position: absolute; left: 50%; top: -40px; width: 70px; height: calc(100% + 40px); margin-left: -35px; z-index: 7; pointer-events: none; animation: zap .6s steps(3) forwards; }
 .oy-zap svg { width: 100%; height: 100%; } .oy-zap path { fill: #fff9d6; filter: drop-shadow(0 0 10px #ffd34d) drop-shadow(0 0 22px #a855f7); }
 @keyframes zap { 0% { opacity: 1; } 50% { opacity: .3; } 70% { opacity: 1; } 100% { opacity: 0; } }
-.oy.flash .oy-grid { animation: gridFlash .5s ease; }
+.oy.oy-flash .oy-grid { animation: gridFlash .5s ease; }
 @keyframes gridFlash { 20% { filter: brightness(1.8); } }
 .oy.tease .oy-frame { animation: tease .3s ease-in-out infinite alternate; }
 @keyframes tease { to { box-shadow: 0 0 40px rgba(80,255,140,.6), 0 20px 40px rgba(0,0,0,.6); } }
@@ -1961,3 +1961,96 @@ body.shake-big .screen.game { animation: shkBig .8s cubic-bezier(.36,.07,.19,.97
 .bfx-sky { position: fixed; inset: 0; width: 100vw; height: 100dvh; pointer-events: none; z-index: 65; }
 .money.bfx-bump { animation: bfxBump .45s ease; }
 @keyframes bfxBump { 35% { transform: scale(1.18); color: #fff3b0; text-shadow: 0 0 10px rgba(255,214,102,.8); } }
+
+/* ===================== Olympus 2: анимации, сферы, удар Глока, бонусы ===================== */
+/* падение: ускорение вниз, размытие в полёте, присед на приземлении */
+.oy-cell.drop { animation: oyDrop2 var(--t) cubic-bezier(.45,0,.9,.55) var(--d) both; }
+@keyframes oyDrop2 {
+  0% { transform: translateY(calc(var(--from) * -1 * (var(--cell) + 3px))) scaleY(1.12); filter: blur(1.6px); opacity: .25; }
+  72% { transform: translateY(0) scaleY(1.06); filter: blur(0); opacity: 1; }
+  84% { transform: translateY(1px) scale(1.07, .88); }
+  100% { transform: none; }
+}
+.oy-cell.drop.slow { animation-timing-function: cubic-bezier(.3,0,.8,.6); }
+.oy-colglow { z-index: 0; border-radius: 12px; pointer-events: none; background: linear-gradient(180deg, rgba(126,240,168,.0), rgba(126,240,168,.18) 30%, rgba(126,240,168,.28)); box-shadow: inset 0 0 0 2px rgba(126,240,168,.55), 0 0 22px rgba(126,240,168,.45);
+  opacity: 0; animation: colGlow .5s ease var(--d) forwards; }
+@keyframes colGlow { to { opacity: 1; } }
+.oy-cell { z-index: 1; }
+/* новые сферы */
+.oy-orb2 { position: relative; width: 94%; height: 94%; display: grid; place-items: center; filter: drop-shadow(0 4px 6px rgba(0,0,0,.55)); }
+.oy-orb-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.oy-orbit { transform-origin: 50px 50px; animation: orbitSpin 2.6s linear infinite; }
+@keyframes orbitSpin { from { transform: rotate(-18deg); stroke-dashoffset: 0; } to { transform: rotate(-18deg); stroke-dashoffset: -60; } }
+.oy-bolt-in { animation: boltFlick 1.7s steps(1) infinite; }
+@keyframes boltFlick { 0%, 100% { opacity: .85; } 46% { opacity: .35; } 52% { opacity: 1; } 58% { opacity: .55; } }
+.oy-orb2 b { position: relative; font-family: var(--display); font-weight: 400; font-size: calc(var(--cell) * .27); color: #fff; letter-spacing: -.02em; text-shadow: 0 2px 0 rgba(0,0,0,.65), 0 0 8px rgba(0,0,0,.6); }
+.m-red .oy-orb-svg circle:first-of-type { filter: drop-shadow(0 0 6px #f43f5e); }
+.oy-orb2.m-red, .oy-orb2.m-purple { animation: orbBreath 1.4s ease-in-out infinite; }
+@keyframes orbBreath { 50% { transform: scale(1.06); } }
+.oy-cell.orb-pulse .oy-orb2 { animation: orbLift .2s ease forwards; }
+@keyframes orbLift { to { transform: scale(1.3); filter: brightness(1.5) drop-shadow(0 0 12px #fff); } }
+.oy-cell.orb-gone > * { opacity: 0; transition: opacity .1s; }
+.oy-flyorb { position: absolute; z-index: 12; pointer-events: none; transform: translate(-50%,-50%); transition: transform .5s cubic-bezier(.5,-0.3,.6,1), opacity .5s ease-in; display: grid; place-items: center; --cell: 54px; }
+.oy-stamp { position: absolute; z-index: 13; pointer-events: none; transform: translate(-50%,-50%); font-family: var(--display); font-size: 30px; color: #fff; text-shadow: 0 0 14px #c084fc, 0 3px 0 #3b0764;
+  animation: stampIn .85s cubic-bezier(.2,1.6,.4,1) forwards; }
+@keyframes stampIn { 0% { transform: translate(-50%,-50%) scale(2.6) rotate(-14deg); opacity: 0; } 25% { transform: translate(-50%,-50%) scale(1) rotate(-6deg); opacity: 1; } 75% { opacity: 1; } 100% { transform: translate(-50%,-110%) scale(.9); opacity: 0; } }
+.oy-acc.up { animation: accUp .5s cubic-bezier(.2,1.5,.4,1); }
+@keyframes accUp { 40% { transform: scale(1.35); box-shadow: 0 0 24px #c084fc; } }
+/* фишки с суммой группы */
+.oy-chip { position: absolute; z-index: 11; pointer-events: none; transform: translate(-50%,-50%); padding: 3px 10px; border-radius: 99px; white-space: nowrap;
+  background: linear-gradient(180deg, #1c3a2a, #0b1f16); border: 1.5px solid #7ef0a8; color: #c9ffe0; font-family: var(--display); font-size: 14px; box-shadow: 0 6px 16px rgba(0,0,0,.6), 0 0 14px rgba(126,240,168,.4);
+  animation: chipIn .35s cubic-bezier(.2,1.6,.4,1); transition: transform .5s cubic-bezier(.5,-0.2,.7,1), opacity .5s ease-in; }
+.oy-chip.big { font-size: 18px; border-color: #ffd34d; color: #fff3b0; background: linear-gradient(180deg, #4a3608, #1f1603); box-shadow: 0 6px 16px rgba(0,0,0,.6), 0 0 18px rgba(255,211,77,.55); }
+.oy-chip.fly { opacity: .15; }
+@keyframes chipIn { from { transform: translate(-50%,-50%) scale(.2); opacity: 0; } }
+/* удар Глока */
+.oy.strike .oy-grid { filter: brightness(.45) saturate(.6); transition: filter .25s; }
+.oy.strike .oy-cell.strike-in { filter: brightness(2.2); z-index: 5; }
+.oy-grid { transition: filter .3s; }
+.oy-cell.strike-in { animation: strikeIn .55s cubic-bezier(.2,1.5,.4,1); }
+@keyframes strikeIn { 0% { transform: scale(2.4); filter: brightness(3) blur(2px); } 100% { transform: none; } }
+.oy-zap.at { top: -30px; width: 54px; margin-left: -27px; transform-origin: top; }
+/* бонус «Беспредел»: рама золото-красная */
+.oy.super .oy-frame { background: linear-gradient(145deg, #ffe08a, #b91c1c 35%, #450a0a 62%, #ffe08a); box-shadow: 0 0 44px rgba(244,63,94,.5); }
+.oy.super .oy-grid { background: radial-gradient(circle at 50% 30%, #5a1a1a, #2a0a0a 60%, #120404); }
+/* заставка бонуса */
+.oy-flyscat { position: absolute; z-index: 14; pointer-events: none; transform: translate(-50%,-50%); display: grid; place-items: center; transition: transform .7s cubic-bezier(.5,0,.3,1), opacity .7s ease-in; --cell: 54px; }
+.oy-flyscat > * { width: 100%; height: 100%; }
+.oy-intro { position: absolute; inset: -6px; z-index: 15; display: grid; place-items: center; overflow: hidden; border-radius: 20px; background: radial-gradient(circle at 50% 45%, rgba(107,33,168,.92), rgba(20,6,30,.96) 70%); animation: fadeIn .25s ease; }
+.oy-intro.super { background: radial-gradient(circle at 50% 45%, rgba(185,28,28,.92), rgba(30,6,6,.96) 70%); }
+.oy-intro.out { opacity: 0; transform: scale(1.05); transition: .3s; }
+.oy-intro-in { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; animation: pop .5s cubic-bezier(.2,1.4,.4,1); }
+.oy-intro-glok { width: 74px; height: 74px; border-radius: 50%; overflow: hidden; box-shadow: 0 0 0 3px #f5c542, 0 0 30px rgba(245,197,66,.7); margin-bottom: 6px; animation: glokThrow .9s ease .2s; }
+.oy-intro-glok > * { width: 100%; height: 100%; object-fit: cover; }
+.oy-intro small { font-size: 12px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; color: #f5d0fe; }
+.oy-intro.super small { color: #fecdd3; }
+.oy-intro-n { font-family: var(--display); font-weight: 400; font-size: clamp(64px, 22vw, 96px); line-height: 1; background: linear-gradient(180deg, #fff1b8, #f5c542 45%, #a0640e); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 4px 0 #3a2404); }
+.oy-intro-n.done { animation: pump .6s ease; }
+.oy-intro span { font-family: var(--display); font-size: clamp(16px, 5vw, 22px); color: #fff; }
+.oy-intro em { font-style: normal; font-size: 12px; font-weight: 700; color: #e9d5ff; margin-top: 4px; }
+/* большие выигрыши: новый уровень */
+.oy-big.legend { background: radial-gradient(circle at 50% 45%, rgba(120,20,20,.85), rgba(5,3,10,.92) 70%); }
+.oy-big.legend .oy-rays { background: repeating-conic-gradient(rgba(255,214,102,.28) 0 8deg, transparent 8deg 16deg); animation-duration: 6s; }
+.oy-big.legend .oy-big-in b { background: linear-gradient(180deg, #ffffff, #ffd34d 40%, #f43f5e); -webkit-background-clip: text; background-clip: text; font-size: clamp(30px, 9.5vw, 46px); }
+/* покупка бонусов */
+.oy-buym h2 { font-family: var(--display); font-weight: 400; color: var(--gold); font-size: 22px; }
+.oy-bcards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+.oy-bcard { --cell: 56px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px; border-radius: 16px; text-align: center;
+  background: linear-gradient(180deg, #2a1240, #150a22); border: 1px solid #a855f7; box-shadow: 0 0 18px rgba(168,85,247,.25); }
+.oy-bcard.sup { background: linear-gradient(180deg, #3d0f12, #1a0607); border-color: #f43f5e; box-shadow: 0 0 18px rgba(244,63,94,.3); }
+.oy-bcard:disabled { opacity: .4; }
+.oy-bcard:active:not(:disabled) { transform: scale(.97); }
+.oy-bc-orb { width: 56px; height: 56px; display: grid; place-items: center; }
+.oy-bc-orb > * { width: 100%; height: 100%; }
+.oy-bcard b { font-family: var(--display); font-weight: 400; font-size: 18px; color: #fff3d6; }
+.oy-bcard small { font-size: 11.5px; color: #d9d2e4; line-height: 1.3; min-height: 30px; }
+.oy-bcard em { font-style: normal; font-family: var(--display); font-size: 16px; color: #7ef0a8; display: inline-flex; align-items: center; }
+@media (max-width: 360px) { .oy-bcards { grid-template-columns: 1fr; } }
+.oy.bonus .oy-say { display: none; }
+@media (max-width: 370px) {
+  .oy-ctl { gap: 6px 8px; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); }
+  .oy-small { font-size: 11.5px; padding: 9px 4px; gap: 4px; min-width: 0; }
+  .oy-small span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oy-spin { width: 80px; height: 80px; }
+  .oy-bet { min-width: 0; } .oy-bet button { width: 28px; height: 30px; }
+}

@@ -127,9 +127,9 @@ app.post('/api/olympus', wrap(async (req, res) => {
   const a = who(req);
   if (!a) return res.status(400).json({ error: 'Нужен профиль' });
   if (limited(req, 40)) return res.status(429).json({ error: 'Не так быстро' });
-  const bet = Number((req.body || {}).bet), buy = !!(req.body || {}).buy, ante = !buy && !!(req.body || {}).ante;
+  const bet = Number((req.body || {}).bet), b = (req.body || {}).buy, buy = b === 'super' ? 'super' : !!b, ante = !buy && !!(req.body || {}).ante;
   if (!OLY_BETS.includes(bet)) return res.status(400).json({ error: 'Нет такой ставки' });
-  const cost = Math.round(bet * (buy ? OLY.BUY_PRICE : ante ? 1.25 : 1));
+  const cost = Math.round(bet * (buy === 'super' ? OLY.SUPER_PRICE : buy ? OLY.BUY_PRICE : ante ? 1.25 : 1));
   // Если взят долг из общака — сначала играем «бонусными» бабками (выигрыш с них тоже бонусный, до отыгрыша)
   const bonusLeft = await store.bonusBet(a.key, cost);
   const fromBonus = bonusLeft != null;
