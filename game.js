@@ -175,7 +175,7 @@ function render() {
   // игра стартовала, пока человек был в магазине/персонажах из лобби — возвращаем за стол
   if ((screen === 'shop' || screen === 'chars') && st && st.status === 'PLAYING' && render.last === 'LOBBY') { screen = null; toast('Сходка началась!'); }
   render.last = st ? st.status : null;
-  if (screen === 'shop' || screen === 'chars') return; // свои экраны закрываются кнопкой «назад»
+  if (screen === 'shop' || screen === 'chars' || screen === 'durak' || screen === 'olympus') return; // свои экраны закрываются кнопкой «назад»
   const want = !st || !myId ? 'home' : st.status === 'LOBBY' ? 'lobby' : st.status === 'PLAYING' ? 'game' : 'over';
   if (want === 'game') {
     if (screen !== 'game') buildGame();
@@ -258,6 +258,8 @@ function renderHome() {
     <div class="hero-info">${charCap(profile.char)}</div>
     <div class="menu-cta">
       <button class="btn-play" id="play"><span>Играть</span><i class="shine"></i></button>
+      <button class="mode-btn" id="durakB"><span class="mb-cards">${window.DurakUI ? DurakUI.card('14s', 'mini') + DurakUI.card('14h', 'mini r2') : ''}</span><span class="mb-t"><b>Дурак онлайн</b><small>столы на бабки · подкидной и переводной</small></span>${ic('back', 'mb-arr')}</button>
+      <button class="mode-btn oy-mode" id="olyB"><span class="mb-cards oy-mb"><img src="art-crown.webp" alt=""></span><span class="mb-t"><b>Bratva Olympus</b><small>слот на бабки · сферы Глока до ×1000</small></span>${ic('back', 'mb-arr')}</button>
     </div>
     <nav class="dock">
       <button data-shop="coins">${ic('cart')}<span>Магазин</span></button>
@@ -283,6 +285,8 @@ function renderHome() {
   $('#play').onclick = () => playSheet();
   $('#daily').onclick = () => showBonus();
   $('#rules').onclick = showRules;
+  $('#olyB').onclick = () => Olympus.show();
+  $('#durakB').onclick = () => { if (!myName()) return needName(() => DurakUI.show()); DurakUI.show(); };
   $('#top').onclick = () => renderTop();
   if (urlRoomState.code && !renderHome.invited) { renderHome.invited = true; setTimeout(() => playSheet('code'), 300); }
 }
@@ -1081,7 +1085,8 @@ const suitSvg = (su) => `<svg viewBox="0 0 24 24" class="suit"><path d="${SUIT[s
 const cardHTML = (c) => `<div class="pcard ${c.s === 'h' || c.s === 'd' ? 'red' : ''}"><b>${c.r}</b>${suitSvg(c.s)}<b class="pc-bot">${c.r}</b></div>`;
 const casinoUI = { game: 'slots', bet: null, pick: 'red' };
 const GAMES = {
-  slots: { t: 'Автомат', i: 'slots', d: 'Три одинаковых: вишни ×3, лимоны ×4, колокола ×6, бриллианты ×10, семёрки ×25. Пара — ставка назад и +20%.' },
+  slots: { t: 'Автомат', i: 'slots', d: 'Три одинаковых: вишни ×3, лимоны ×4, колокола ×6, бриллианты ×10, семёрки ×25. Пара — ставка назад и +50%.' },
+  olympus: { t: 'Olympus', i: 'bolt', d: 'Bratva Olympus: 8+ одинаковых в любом месте, каскады, сферы Глока до ×1000, бонус с бесплатными спинами. До ×15 000.' },
   roulette: { t: 'Рулетка', i: 'roulette', d: 'Цвет и чёт/нечет — ×2, дюжина — ×3, зеро — ×36. Выпало зеро — ставка на цвет или чётность возвращается наполовину.' },
   ochko: { t: 'Очко', i: 'cards', d: 'Против крупье до 21. Выигрыш ×2, очко с раздачи и два туза ×2.5.' },
 };
@@ -1342,6 +1347,15 @@ function showFx(fx) {
     SFX.play('card');
     const p = byId(fx.pid);
     overlay(`<div class="fx card-fx"><div class="cf-inner"><div class="cf-top">${ic('c-zvonok')}Звонок с зоны</div><div class="cf-who">${p ? esc(p.name) : ''}</div><div class="cf-text">${esc(fx.text)}</div></div></div>`, 1700);
+  } else if (fx.type === 'olympus') {
+    const p = byId(fx.pid);
+    const ov = document.createElement('div');
+    ov.className = 'overlay show scene oy-ov';
+    ov.innerHTML = `<div class="oy-ovin"><div class="ev-kicker">${p ? esc(p.name) : ''} · ставка $${fx.bet}</div><div id="oyOvHost"></div></div>`;
+    $$('.overlay.scene').forEach((o) => o.remove());
+    document.body.appendChild(ov);
+    const v = Olympus.mount($('#oyOvHost', ov), { compact: true, glok: pic('glok') });
+    Olympus.animate(v, fx.r, { bet: fx.bet, speed: 1.15, fsSpeed: 2.4, bigHost: ov }).then(() => setTimeout(() => { ov.classList.remove('show'); setTimeout(() => ov.remove(), 300); }, 1300));
   } else if (fx.type === 'slots' || fx.type === 'roulette' || fx.type === 'ochko') {
     casinoFx(fx);
   } else if (fx.type === 'glok') {
@@ -1553,7 +1567,7 @@ function showRules() {
     <p><b>События района.</b> Каждый третий круг — событие: Час пик (доля ×2), Жирный круг (Общак вдвое), Передел (+2 нападающим), Облава, Дефолт, Амнистия. Последние 3 круга — доля ×1.5.</p>
     <p><b>Козыри.</b> Перед броском можно разыграть один козырь: Подрыв ($120) — минус звезда у чужой точки, а без звёзд точка уходит банку; Перестрелка — кубик + сила, проигравший отдаёт $120 и братка; Стук ($80) — соперник едет в тюрьму; Крыша — защищает от следующего козыря. Новый козырь — за каждый проход Общака, максимум 3.</p>
     <p><b>Погоня.</b> Встал на «Ментов» или на тебя стуканули — можно уйти от погони: веди машину пальцем, объезжай тачки и баррикады ДПС, собирай нитро. Продержался — не сидишь и получаешь монеты. Разбил машину или догнали — тюрьма.</p>
-    <p><b>Казино</b> на игровые $: ставки до $1000. Автомат щедрый: пара — ставка +50%, семёрки ×25. Рулетка: цвет и чёт/нечет ×2, дюжина ×3, зеро ×36; на зеро ставка на цвет возвращается наполовину.</p>
+    <p><b>Казино</b> на игровые $: ставки до $1000. Автомат щедрый: пара — ставка +50%, семёрки ×25. Рулетка: цвет и чёт/нечет ×2, дюжина ×3, зеро ×36; на зеро ставка на цвет возвращается наполовину. Bratva Olympus: 8+ одинаковых в любом месте, каскады, сферы Глока до ×1000 и бесплатные спины.</p>
     <p><b>Призы за катку</b> — монеты: 1 место ${EARN.game + EARN.place[0]}, 2 — ${EARN.game + EARN.place[1]}, 3 — ${EARN.game + EARN.place[2]}, остальным ${EARN.game}. С ботами — половина.</p>
     <p><b>Сделки</b> — в любой момент можно продать свою точку или выкупить чужую, кнопка сделки вверху экрана.</p>
     <p><b>Персонажи</b> — у каждого своя фишка, посмотреть можно в «Персонажах». А иногда при старте одному игроку выпадает тайный <b>Будка</b>: заговорщик, на которого действует только Глок.</p>
@@ -1605,7 +1619,7 @@ function renderOver() {
 
 
 // ---------- Магазин ----------
-const SHOP_TABS = [['coins', 'Монеты', 'coin'], ['chars', 'Персонажи', 'masks'], ['frame', 'Рамки', 'frame'], ['dice', 'Кубики', 'dice'], ['title', 'Титулы', 'tag'], ['theme', 'Темы', 'frame'], ['gifts', 'Подарки', 'gift']];
+const SHOP_TABS = [['coins', 'Монеты', 'coin'], ['chars', 'Персонажи', 'masks'], ['frame', 'Рамки', 'frame'], ['dice', 'Кубики', 'dice'], ['title', 'Титулы', 'tag'], ['theme', 'Темы', 'frame'], ['cards', 'Карты', 'cards'], ['gifts', 'Подарки', 'gift']];
 let shopTab = 'coins', shopFocus = null;
 const myFace = () => (me && me.photo ? `<img src="${esc(me.photo)}" alt="" referrerpolicy="no-referrer">` : pic(profile.char));
 function renderShop(tab, focus) {
@@ -1652,6 +1666,10 @@ function renderShop(tab, focus) {
   } else if (shopTab === 'dice') {
     body = `<div class="shop-grid">${list('dice').map(([id, v]) => item(id, v, assetFor(id) ? `<img src="${assetFor(id)}" alt="" class="si-img">` : `<div class="dice mini-dice ${id}"><div class="die">${PIPS[5].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div><div class="die">${PIPS[6].map((n) => `<i style="grid-area:${Math.ceil(n / 3)}/${((n - 1) % 3) + 1}"></i>`).join('')}</div></div>`, `<b>${v.name}</b>`)).join('')}</div>
       <div class="hint center-t">Твои кубики видят все, когда бросаешь ты.</div>`;
+  } else if (shopTab === 'cards') {
+    body = `<h3 class="shop-h">Рубашка карт — видят все за столом</h3><div class="shop-grid">${list('back').map(([id, v]) => item(id, v, `<span class="si-back">${DurakUI.back(id)}</span>`, `<b>${v.name}</b>`)).join('')}</div>
+      <h3 class="shop-h">Сукно стола — видишь ты</h3><div class="shop-grid">${list('felt').map(([id, v]) => item(id, v, `<i class="si-felt felt-${id.replace('felt-', '')}"></i>`, `<b>${v.name}</b>`)).join('')}</div>
+      <div class="hint center-t">Оформление для «Дурака». Если за столом есть дилер, все видят его сукно.</div>`;
   } else if (shopTab === 'theme') {
     body = `<div class="shop-grid">${list('theme').map(([id, v]) => item(id, v, `<div class="theme-prev" data-theme="${id.replace('theme-', '')}"><i class="tp-board"><i class="tp-felt"></i></i><i class="tp-cta"></i></div>`, `<b>${v.name}</b>`)).join('')}</div>
       <div class="hint center-t">Тема меняет оформление игры только у тебя: фон, поле, стол и кнопки. Сняв тему, вернёшься к классической «Братве».</div>`;
@@ -1864,4 +1882,12 @@ Promise.race([assetsReady, new Promise((r) => setTimeout(r, 1200))]).then(() => 
 });
 // отладка сцен: ?fxdebug — открывает доступ к показу сцен для визуальной проверки
 if (/[?&]fxdebug\b/.test(location.search)) window.__dbg = { showFx: (x) => showFx(x), setSt: (x) => { st = x; }, crowd: () => updateCrowd(), setMe: (id) => { myId = id; } };
+window.BR = {
+  api, coinBurst, socket, LS, ident, ic, esc, avatar, toast, modal, flash, copyText, SFX: window.SFX,
+  wallet: () => wallet, profile: () => profile, myName,
+  setScreen: (x) => { screen = x; closeSheet(); $$('.modal').forEach((m) => m.remove()); },
+  home: () => { screen = null; render(); },
+};
+// приглашение за стол «Дурака» по ссылке
+{ const dk = new URLSearchParams(location.search).get('durak'); if (dk) setTimeout(() => { if (!myName()) return needName(() => { DurakUI.show(); socket.emit('dk:join', { ...ident(), code: dk, name: myName(), char: profile.char }); }); DurakUI.show(); socket.emit('dk:join', { ...ident(), code: dk, name: myName(), char: profile.char }); }, 900); }
 })();

@@ -30,6 +30,8 @@ async function init() {
         daily_on date, streak int NOT NULL DEFAULT 0, earned_on date, earned_today int NOT NULL DEFAULT 0,
         spent int NOT NULL DEFAULT 0, bought int NOT NULL DEFAULT 0, updated timestamptz NOT NULL DEFAULT now())`);
       await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS spin_on date`);
+      await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS bucks int NOT NULL DEFAULT 5000 CHECK (bucks >= 0)`);
+      await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS bucks_on date`);
       await pool.query(`ALTER TABLE wallets ADD COLUMN IF NOT EXISTS bonus_spins int NOT NULL DEFAULT 0`);
       await pool.query(`CREATE TABLE IF NOT EXISTS payments (
         charge_id text PRIMARY KEY, key text NOT NULL, pack text NOT NULL, stars int NOT NULL, coins int NOT NULL,
@@ -128,10 +130,10 @@ async function count() {
 }
 
 // ---------- Кошельки ----------
-const blank = (key) => ({ key, coins: 0, items: [], equip: {}, daily_on: null, streak: 0, earned_on: null, earned_today: 0, spent: 0, bought: 0, spin_on: null, bonus_spins: 0 });
+const blank = (key) => ({ key, coins: 0, items: [], equip: {}, daily_on: null, streak: 0, earned_on: null, earned_today: 0, spent: 0, bought: 0, spin_on: null, bonus_spins: 0, bucks: 5000, bucks_on: null });
 function norm(w) {
   const d = (x) => (x instanceof Date ? x.toISOString().slice(0, 10) : x || null);
-  return { coins: +w.coins, items: w.items || [], equip: w.equip || {}, daily_on: d(w.daily_on), streak: +w.streak, earned_on: d(w.earned_on), earned_today: +w.earned_today, spin_on: d(w.spin_on), bonus_spins: +(w.bonus_spins || 0) };
+  return { coins: +w.coins, items: w.items || [], equip: w.equip || {}, daily_on: d(w.daily_on), streak: +w.streak, earned_on: d(w.earned_on), earned_today: +w.earned_today, spin_on: d(w.spin_on), bonus_spins: +(w.bonus_spins || 0), bucks: w.bucks == null ? 5000 : +w.bucks, bucks_on: d(w.bucks_on) };
 }
 async function wallet(key) {
   if (pool) {
@@ -236,6 +238,35 @@ async function useSpin(key) {
   saveSoon();
   return true;
 }
+// «Бабки» — бесплатная валюта столов «Дурака». Не покупается. delta < 0 — списание (null, если не хватает).
+async function bucksAdd(key, delta) {
+  delta = Math.round(delta);
+  if (pool) {
+    await pool.query(`INSERT INTO wallets (key) VALUES ($1) ON CONFLICT DO NOTHING`, [key]);
+    const r = await pool.query(`UPDATE wallets SET bucks = bucks + $2, updated = now() WHERE key = $1 AND bucks + $2 >= 0 RETURNING bucks`, [key, delta]);
+    return r.rows[0] ? +r.rows[0].bucks : null;
+  }
+  const w = memW(key);
+  if (w.bucks == null) w.bucks = 5000;
+  if (w.bucks + delta < 0) return null;
+  w.bucks += delta; saveSoon();
+  return w.bucks;
+}
+// Подъёмные: раз в день, если бабок меньше min — докидываем до to
+async function bucksRefill(key, min, to) {
+  if (pool) {
+    await pool.query(`INSERT INTO wallets (key) VALUES ($1) ON CONFLICT DO NOTHING`, [key]);
+    const r = await pool.query(`UPDATE wallets SET bucks = $3, bucks_on = CURRENT_DATE, updated = now()
+      WHERE key = $1 AND bucks < $2 AND bucks_on IS DISTINCT FROM CURRENT_DATE RETURNING bucks`, [key, min, to]);
+    return r.rows[0] ? +r.rows[0].bucks : null;
+  }
+  const w = memW(key);
+  if (w.bucks == null) w.bucks = 5000;
+  if (w.bucks >= min || w.bucks_on === today()) return null;
+  w.bucks = to; w.bucks_on = today(); saveSoon();
+  return w.bucks;
+}
+
 // Выдать предмет бесплатно (приз колеса). false — если уже есть.
 async function grantItem(key, item) {
   if (pool) {
@@ -269,4 +300,4 @@ async function findPayment(chargeId) {
   return mem.payments[chargeId] || null;
 }
 
-module.exports = { init, record, addRespect, top, count, playerStats, wallet, credit, spend, setEquip, claimDaily, useSpin, grantItem, recordPayment, findPayment, get kind() { return pool ? 'postgres' : 'file'; } };
+module.exports = { init, record, addRespect, top, count, playerStats, wallet, credit, spend, setEquip, claimDaily, useSpin, grantItem, bucksAdd, bucksRefill, recordPayment, findPayment, get kind() { return pool ? 'postgres' : 'file'; } };

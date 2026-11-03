@@ -67,6 +67,14 @@
     'title-otmoroz': { kind: 'title', name: 'Отморозок', price: 150 },
     'title-glok': { kind: 'title', name: 'Кент Глока', price: 200 },
     'title-legend': { kind: 'title', name: 'Легенда района', price: 600 },
+    // «Дурак»: рубашки карт (видят все) и сукно стола (видишь ты)
+    'back-gold': { kind: 'back', name: 'Золото', price: 250 },
+    'back-neon': { kind: 'back', name: 'Неон', price: 200 },
+    'back-camo': { kind: 'back', name: 'Камуфляж', price: 150 },
+    'back-zek': { kind: 'back', name: 'Зона', price: 180 },
+    'felt-red': { kind: 'felt', name: 'Казино', price: 150 },
+    'felt-blue': { kind: 'felt', name: 'Питер', price: 150 },
+    'felt-leather': { kind: 'felt', name: 'Подпольный клуб', price: 300 },
     // темы оформления — видит только владелец
     'theme-piter': { kind: 'theme', name: 'Бандитский Петербург', price: 100 },
     'theme-zona': { kind: 'theme', name: 'Зона', price: 150 },
@@ -90,6 +98,16 @@
     roof:  { name: 'Крыша', cost: 0, target: null, text: 'Прикрывает от следующего козыря против тебя.' },
   };
   const MAX_HAND = 3;
+  // «Дурак»: столы-ступени. Ставки — в «бабках» (не покупаются).
+  const DURAK = {
+    tiers: {
+      dvor:   { name: 'Двор', stakes: [50, 100, 250], felt: 'green', tip: 0.4 },
+      kazino: { name: 'Казино «Три топора»', stakes: [500, 1000, 2500], felt: 'red', tip: 0.4 },
+      piter:  { name: 'Питер, набережная', stakes: [1000, 2500, 5000], felt: 'blue', tip: 0.4 },
+      club:   { name: 'Подпольный клуб', stakes: [5000, 10000, 25000], felt: 'leather', tip: 0.4, minBank: 50000 },
+    },
+    start: 5000, refillBelow: 500, refillTo: 1500, fee: 0.05, dealerFee: 4, coins: { first: 10, rest: 4 },
+  };
   const BOOST = { price: 40, pct: 20 };   // «Подъёмные»: +20% к стартовым деньгам на одну партию
   // Призы за катку: платит игра (не другие игроки). Партия только с ботами — половина. Лимит в день.
   const EARN = { daily: 25, ladder: [25, 30, 40, 50, 60, 80, 150], game: 5, place: [40, 20, 10], chase: 8, dayCap: 200 };
@@ -124,7 +142,7 @@
   }
   const cellValue = (id, level) => BOARD[id].price + BOARD[id].up * level;
 
-  const api = { BOARD, GROUPS, C, COLORS, PACKS, SHOP, GIFTS, BOOST, EARN, WHEEL, ACTIONS, MAX_HAND, cellXY, groupOf, ownsGroup, rentOf, cellValue };
+  const api = { BOARD, GROUPS, C, COLORS, PACKS, SHOP, GIFTS, BOOST, EARN, WHEEL, ACTIONS, MAX_HAND, DURAK, cellXY, groupOf, ownsGroup, rentOf, cellValue };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.G = api;
 })(typeof self !== 'undefined' ? self : this);

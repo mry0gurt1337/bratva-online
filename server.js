@@ -41,7 +41,7 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   next();
 });
-const PUBLIC_RE = /^(index\.html|style\.css|game\.js|chase\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
+const PUBLIC_RE = /^(index\.html|style\.css|game\.js|chase\.js|durak-ui\.js|olympus-ui\.js|sound\.js|shared\.js|art\.js|icons\.js|manifest\.json|icon\.svg|logo\.svg|logo-mark\.svg|icon-\d+\.png|sfx-[a-z0-9-]+\.mp3|art-[a-z0-9-]+\.(?:png|jpe?g|webp))$/;
 app.get('/:f?', (req, res, next) => {
   const f = req.params.f || 'index.html';
   if (!PUBLIC_RE.test(f)) return next();
@@ -121,6 +121,25 @@ app.post('/api/spin', wrap(async (req, res) => {
   }
   res.json({ prize, wallet: await store.wallet(a.key) });
 }));
+// Bratva Olympus — на «бабки» (бесплатная валюта, не покупается)
+const OLY_BETS = [10, 20, 50, 100, 200, 500, 1000, 2500];
+app.post('/api/olympus', wrap(async (req, res) => {
+  const a = who(req);
+  if (!a) return res.status(400).json({ error: 'Нужен профиль' });
+  if (limited(req, 40)) return res.status(429).json({ error: 'Не так быстро' });
+  const bet = Number((req.body || {}).bet), ante = !!(req.body || {}).ante;
+  if (!OLY_BETS.includes(bet)) return res.status(400).json({ error: 'Нет такой ставки' });
+  const cost = Math.round(bet * (ante ? 1.25 : 1));
+  const left = await store.bucksAdd(a.key, -cost);
+  if (left == null) {
+    const refill = await store.bucksRefill(a.key, G.DURAK.refillBelow, G.DURAK.refillTo);
+    return res.status(402).json({ error: refill != null ? `Подъёмные: на счету снова ${refill} бабок` : `Не хватает бабок: нужно ${cost}`, bank: refill });
+  }
+  const r = OLY.play(ante);
+  const win = Math.round(r.x * bet);
+  const bank = win ? await store.bucksAdd(a.key, win) : left;
+  res.json({ r, bet, cost, win, bank });
+}));
 app.post('/api/buy', wrap(async (req, res) => {
   const a = who(req), id = String((req.body || {}).item || '');
   const it = SHOP[id];
@@ -137,7 +156,7 @@ app.post('/api/buy', wrap(async (req, res) => {
 }));
 app.post('/api/equip', wrap(async (req, res) => {
   const a = who(req), { slot, item } = req.body || {};
-  if (!a || !['frame', 'dice', 'title', 'theme'].includes(slot)) return res.status(400).json({ error: 'Не тот слот' });
+  if (!a || !['frame', 'dice', 'title', 'theme', 'back', 'felt'].includes(slot)) return res.status(400).json({ error: 'Не тот слот' });
   const w = await store.wallet(a.key);
   if (item && (!SHOP[item] || SHOP[item].kind !== slot || !w.items.includes(item))) return res.status(400).json({ error: 'Сначала купи' });
   res.json({ wallet: await store.setEquip(a.key, slot, item || null) });
@@ -584,6 +603,18 @@ function casinoPlay(r, p, q, choice) {
     if (!profit) casinoLose(r, p, bet, 'автомат съел ставку');
     r.fx = { type: 'slots', pid: p.id, bet, reels: syms, won, seq: ++r.fxSeq };
     return 3000;
+  }
+  if (game === 'olympus') {
+    const res = OLY.play(false);
+    const back = Math.round(res.x * bet);
+    let won = 0;
+    if (back > bet) won = casinoWin(r, p, back - bet, `Bratva Olympus — x${res.x}${res.fs ? ', бонус' : ''}`, {});
+    else if (back < bet) { const lost = bet - back; pay(r, p, lost, null); log(r, `${p.name}: Bratva Olympus — x${res.x}, −$${lost}`, 'loss', { pid: p.id }); }
+    else log(r, `${p.name}: Bratva Olympus — при своих`, 'info', { pid: p.id });
+    r.fx = { type: 'olympus', pid: p.id, bet, r: res, won, seq: ++r.fxSeq };
+    // время анимации: шаги каскадов + бонус в ускоренном показе
+    const steps = res.base.steps.length + (res.fs ? res.fs.spins.reduce((s, x) => s + 1 + x.steps.length * 0.5, 0) : 0);
+    return Math.min(26000, 3200 + steps * 900);
   }
   if (game === 'roulette') {
     // ставки: цвет (×2), чёт/нечет (×2), дюжина (×3), зеро (×36). На зеро ставки на цвет и чётность возвращаются наполовину.
@@ -1329,7 +1360,7 @@ function botAct(r) {
     case 'GYM': c = p.goons < 2 && p.money > 350 ? 'yes' : 'no'; break;
     case 'CASINO': {
       if (p.money < 600 || rnd(3) === 0) { c = 'skip'; break; }
-      const g = ['slots', 'roulette', 'ochko'][rnd(3)];
+      const g = ['slots', 'roulette', 'ochko', 'olympus'][rnd(4)];
       c = g === 'roulette' ? `roulette:${q.bets[0]}:${rnd(2) ? 'red' : 'black'}` : `${g}:${q.bets[0]}`;
       break;
     }
@@ -1647,6 +1678,10 @@ setInterval(() => {
     }
   }
 }, 60000).unref();
+
+// «Дурак» — свой набор событий dk:* на том же сокете
+const durak = require('./durak.js').attach(io, { store, account, cleanName, CHARS });
+const OLY = require('./olympus.js');
 
 store.init().then(() => server.listen(PORT, '0.0.0.0', async () => {
   const publicUrl = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
