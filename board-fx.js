@@ -51,7 +51,7 @@ window.BFX = (() => {
     if (!board || !cv) return;
     const br = cv.getBoundingClientRect();
     W = br.width; H = br.height;
-    dpr = Math.min(2, window.devicePixelRatio || 1);
+    dpr = 1; // свет, дым и частицы размытые — чёткость 2–3× тут не видна, а передавать кадр видеочипу вчетверо дороже
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     cx.setTransform(dpr, 0, 0, dpr, 0, 0);
     cells = G().BOARD.map((c) => {
@@ -508,21 +508,27 @@ window.BFX = (() => {
   }
 
   // ---------- главный цикл ----------
-  let frames = 0, fpsT = 0, fps = 60;
+  // 30 кадров в секунду: для света, дыма и частиц этого хватает, а нагрузка вдвое меньше.
+  // Пока открыта мини-игра или сцена поверх поля — поле не рисуем вовсе.
+  let frames = 0, fpsT = 0, fps = 30, lastDraw = 0, skyDirty = false;
+  const covered = () => !!document.querySelector('.chase, .gl-ov, .oy-ov.show, .overlay.scene.show');
   function loop() {
     cancelAnimationFrame(raf);
     if (!alive()) { detach(); return; }
     if (document.hidden) return;
     raf = requestAnimationFrame(loop);
     const t = now(), st = getSt && getSt();
+    if (t - lastDraw < 1 / 31) return;
+    lastDraw = t;
+    if (covered() && !skyEv.length) return;
     frames++; if (t - fpsT > 1) { fps = frames / (t - fpsT); frames = 0; fpsT = t; }
     const br = cv.getBoundingClientRect();
     if (Math.abs(br.width - W) > 1 || Math.abs(br.height - H) > 1 || SW !== innerWidth || SH !== innerHeight) measure();
     cx.clearRect(0, 0, W, H);
     if (!reduce) { drawAmbient(cx, t, st); updPigeons(t); drawPigeons(cx, t); }
     drawEvents(cx, t, st);
-    sx.clearRect(0, 0, SW, SH);
-    drawSky(sx, t);
+    // верхний холст трогаем, только когда по экрану что-то летит
+    if (skyEv.length || skyDirty) { sx.clearRect(0, 0, SW, SH); drawSky(sx, t); skyDirty = skyEv.length > 0; }
   }
 
   // ---------- что изменилось в партии → какие эффекты ----------

@@ -633,7 +633,7 @@ function buildGame() {
   updSound();
   setConn(socket.connected);
   // живой слой поля: свет, дым, голуби, сочность событий
-  if (window.BFX) BFX.attach($('#board'), () => st);
+  if (window.BFX && !LS.get('bratva_fx_off', false)) BFX.attach($('#board'), () => st);
 }
 
 function updSound() { const b = $('#snd'); if (b) b.innerHTML = ic(SFX.on ? 'sound' : 'mute'); }
@@ -727,6 +727,9 @@ function updateGame() {
   else if (st.phase === 'DECIDE') status = mine ? '<b>Решай!</b>' : `<b style="color:${cp.color}">${name}</b> ${pendingText(st.pending)}`;
   else if (st.phase === 'ANIM') status = '…';
   else if (st.phase === 'GLOK') status = '<b>Глок</b> решает вопросики…';
+  else if (st.phase === 'MINI' && st.mini) { const c = byId(st.mini.pid); status = `<b style="color:${c ? c.color : '#fff'}">${c ? esc(c.name) : ''}</b> в мини-игре…`; }
+  else if (st.phase === 'GLASSES' && st.glasses) { const c = byId(st.glasses.pid); status = `<b style="color:${c ? c.color : '#fff'}">${c ? esc(c.name) : ''}</b> играет в бокалы…`; }
+  else if (st.phase === 'HEIST' && st.heist) { const c = byId(st.heist.pid); status = `<b style="color:${c ? c.color : '#fff'}">${c ? esc(c.name) : ''}</b> на налёте…`; }
   else if (st.phase === 'CHASE' && st.chase) { const c = byId(st.chase.pid); status = `<b style="color:${c ? c.color : '#fff'}">${c ? esc(c.name) : ''}</b> уходит от погони…`; }
   $('#status').innerHTML = status;
   roll.hidden = !(mine && st.phase === 'ROLL');
@@ -752,6 +755,9 @@ function updateGame() {
   updateCrowd();
   updateEventBadge();
   updateChase();
+  updateHeist();
+  updateGlasses();
+  updateMini();
   updateOffers();
 
   if (mine && st.phase === 'DECIDE' && st.pending) openSheet(st.pending);
@@ -873,8 +879,60 @@ function updateChase() {
   }
 }
 
+// ---------- Мини-игры клеток ----------
+let miniSeq = 0, miniGame = null, miniWatch = null;
+function updateMini() {
+  const m = st.mini;
+  if (!m) { if (miniWatch) { miniWatch.remove(); miniWatch = null; } return; }
+  if (m.seq === miniSeq) return;
+  miniSeq = m.seq;
+  closeSheet();
+  const p = byId(m.pid), mine = m.pid === myId, send = (res) => socket.emit('miniEnd', { seq: m.seq, res });
+  if (m.kind === 'naperstki' && window.Glasses) {
+    miniGame = Glasses.start({ mode: 'thimble', start: m.pub.start, swaps: m.pub.swaps, cheat: null, sees: m.pub.sees, spectator: !mine, name: p ? p.name : '', onPick: (idx) => send({ pick: idx }) });
+  } else if (mine && window.Minis && Minis[m.kind]) {
+    miniGame = Minis[m.kind](m.pub, { onEnd: send });
+  } else {
+    miniWatch = document.createElement('div');
+    miniWatch.className = 'chase-watch';
+    miniWatch.innerHTML = `<span class="cw-ic">${ic('dice')}</span><span><b>${p ? esc(p.name) : ''}</b> играет<small>${(MINI_INFO[m.kind] || [''])[0]}</small></span>`;
+    document.body.appendChild(miniWatch);
+  }
+}
+
+// ---------- Четыре бокала ----------
+let glSeq = 0, glGame = null;
+function updateGlasses() {
+  const g = st.glasses;
+  if (!g || g.seq === glSeq || !window.Glasses) return;
+  glSeq = g.seq;
+  closeSheet();
+  const p = byId(g.pid), mine = g.pid === myId;
+  glGame = Glasses.start({ ...g, spectator: !mine, name: p ? p.name : '', onPick: (idx) => socket.emit('glassesPick', { seq: g.seq, idx }) });
+}
+
+// ---------- Налёт ----------
+let heistSeq = 0, heistWatch = null;
+function updateHeist() {
+  const h = st.heist;
+  if (!h) { if (heistWatch) { heistWatch.remove(); heistWatch = null; } return; }
+  if (h.seq === heistSeq) return;
+  heistSeq = h.seq;
+  closeSheet();
+  if (h.pid === myId && window.Heist) {
+    Heist.start({ bag: 15, onEnd: (ok, bags) => socket.emit('heistEnd', { seq: h.seq, ok, bags }) });
+  } else {
+    const p = byId(h.pid);
+    SFX.play('siren');
+    heistWatch = document.createElement('div');
+    heistWatch.className = 'chase-watch';
+    heistWatch.innerHTML = `<span class="cw-ic">${ic('briefcase')}</span><span><b>${p ? esc(p.name) : ''}</b> идёт на налёт<small>тараним инкассатора, до 30 секунд</small></span>`;
+    document.body.appendChild(heistWatch);
+  }
+}
+
 // ---------- Козыри ----------
-const ACT_IC = { boom: 'flame', shoot: 'sword', snitch: 'siren', roof: 'shield' };
+const ACT_IC = { boom: 'flame', shoot: 'sword', snitch: 'siren', roof: 'shield', heist: 'briefcase' };
 function showHand() {
   const mp = meP();
   if (!mp) return;
@@ -917,6 +975,11 @@ function showAct(fx) {
   if (fx.blocked) {
     SFX.play('fight');
     overlay(`<div class="fx act-fx"><div class="ev-kicker">${esc(a.name)} · ${A.name}</div><div class="act-big">${ic('shield')}</div><div class="fx-title">НЕ ПРОШЛО</div><div class="ev-text">${t ? esc(t.name) + ': ' : ''}${esc(fx.blocked)}</div></div>`, 2000);
+    return;
+  }
+  if (fx.kind === 'heist') {
+    SFX.play('siren'); SFX.vibe([60, 40, 60]);
+    overlay(`<div class="fx act-fx heist-fx"><div class="ev-kicker">${esc(a.name)} · Налёт</div><div class="act-big">${ic('briefcase')}</div><div class="fx-title">БРОНЕВИК НА ТРАССЕ</div><div class="ev-text">Таранить сзади, собирать мешки, не светиться под вертолётом</div></div>`, 1500);
     return;
   }
   if (fx.kind === 'roof') {
@@ -1105,6 +1168,12 @@ function openCasino(q) {
   const mp = meP();
   if (!q.bets.includes(casinoUI.bet)) casinoUI.bet = q.bets[0];
   const shuler = mp.char === 'shuler';
+  // «Улучшить»: дороже ставка — выше шанс; отдача та же
+  const UP_MUL = { slots: 1.55, olympus: 1.25, ochko: 1.25, roulette: { red: 1.5, black: 1.5, even: 1.5, odd: 1.5, d1: 1.68, d2: 1.68, d3: 1.68, zero: 1.97 } };
+  const UP_TEXT = { slots: 'две попытки — засчитаем лучшую', roulette: 'два шарика — выигрыш, если попадёт любой', olympus: 'как «Ставка+»: бонус почти втрое чаще', ochko: 'подсмотришь вторую карту крупье' };
+  const upOk = !(casinoUI.game === 'ochko' && shuler);
+  const upMul = casinoUI.game === 'roulette' ? UP_MUL.roulette[casinoUI.pick] || 1.5 : UP_MUL[casinoUI.game];
+  const cost = casinoUI.up && upOk ? Math.round(casinoUI.bet * upMul) : casinoUI.bet;
   $('#sheet').innerHTML = `
     <div class="casino-sheet">
       <div class="cs-head"><div class="cs-title">КАЗИНО</div><div class="cs-sub">«Три топора» · у тебя $${mp.money}${shuler ? ' · <b>Шулер: выигрыш +50%</b>' : ''}</div></div>
@@ -1122,14 +1191,17 @@ function openCasino(q) {
           </div></div></div>
         ${(casinoUI.hist || []).length ? `<div class="roul-hist">${casinoUI.hist.map((n) => `<i class="${n === 0 ? 'z' : RED_N.has(n) ? 'r' : 'b'}">${n}</i>`).join('')}</div>` : ''}` : ''}
       <div class="cs-chips">${q.bets.map((b) => `<button data-bet="${b}" class="chip c${b} ${b === casinoUI.bet ? 'on' : ''}"><span>$${b}</span></button>`).join('')}</div>
-      <div class="sh-btns"><button class="btn gold big" id="csgo">Играть на $${casinoUI.bet}</button><button class="btn" id="csno">Не играю</button></div>
+      ${upOk ? `<button class="cs-up ${casinoUI.up ? 'on' : ''}" id="csup"><span class="cs-up-box">${casinoUI.up ? ic('check') : ''}</span><span class="cs-up-t"><b>Улучшить · ставка ×${upMul}</b><small>${UP_TEXT[casinoUI.game]}</small></span></button>` : ''}
+      <div class="sh-btns"><button class="btn gold big" id="csgo" ${cost > mp.money ? 'disabled' : ''}>Играть на $${cost}</button><button class="btn" id="csno">Не играю</button></div>
       <div class="sh-timer"><i id="shbar"></i></div>
     </div>`;
   $$('[data-game]').forEach((b) => b.onclick = () => { casinoUI.game = b.dataset.game; SFX.play('click'); openCasino(q); });
   $$('[data-pick]').forEach((b) => b.onclick = () => { casinoUI.pick = b.dataset.pick; SFX.play('click'); openCasino(q); });
   $$('[data-bet]').forEach((b) => b.onclick = () => { casinoUI.bet = Number(b.dataset.bet); SFX.play('tick'); openCasino(q); });
+  if ($('#csup')) $('#csup').onclick = () => { casinoUI.up = !casinoUI.up; SFX.play('click'); openCasino(q); };
   const send = (choice) => { socket.emit('decide', { choice }); SFX.play('click'); $$('#sheet button').forEach((x) => { x.disabled = true; }); };
-  $('#csgo').onclick = () => send(casinoUI.game === 'roulette' ? `roulette:${casinoUI.bet}:${casinoUI.pick}` : `${casinoUI.game}:${casinoUI.bet}`);
+  const upTag = casinoUI.up && upOk ? ':up' : '';
+  $('#csgo').onclick = () => send((casinoUI.game === 'roulette' ? `roulette:${casinoUI.bet}:${casinoUI.pick}` : `${casinoUI.game}:${casinoUI.bet}`) + upTag);
   $('#csno').onclick = () => send('skip');
   $('#sheetback').classList.add('show');
 }
@@ -1383,6 +1455,16 @@ function showFx(fx) {
   } else if (fx.type === 'chase') {
     const p = byId(fx.pid);
     if (fx.pid !== myId) flash(fx.ok ? `${p ? p.name : ''} ушёл от погони` : `${p ? p.name : ''} приняли`, fx.ok ? 'deal' : 'dead');
+  } else if (fx.type === 'mini') {
+    if (miniGame) { miniGame.reveal(fx); miniGame = null; }
+    else { const p = byId(fx.pid); flash(`${p ? p.name : ''}: ${fx.text}`, fx.won ? 'deal' : 'dead'); }
+  } else if (fx.type === 'glasses') {
+    if (glGame) { glGame.reveal(fx); glGame = null; }
+    else { const p = byId(fx.pid); flash(`${p ? p.name : ''} в Клубе: ${{ ring: 'перстень', konyak: 'коньяк', vodka: 'водка', klof: 'клофелин' }[fx.got]}`, fx.got === 'klof' ? 'dead' : 'deal'); }
+  } else if (fx.type === 'heist') {
+    const p = byId(fx.pid);
+    if (fx.ok) { SFX.play('casino-win'); flash(`${p ? p.name : ''}: налёт удался · +$${fx.amount}`, 'deal'); }
+    else { SFX.play('jail'); flash(`${p ? p.name : ''}: налёт сорвался`, 'dead'); }
   } else if (fx.type === 'act') {
     showAct(fx);
   } else if (fx.type === 'event') {
@@ -1436,6 +1518,13 @@ function rentRows(id) {
   const c = BOARD[id], k = (st && st.inflation) || 1;
   return `<div class="rents">${[0, 1, 2, 3].map((l) => `<div><span>${l ? stars(l) : 'база'}</span><b>$${c.rent * Math.pow(2, l) * k}</b></div>`).join('')}</div>`;
 }
+const MINI_INFO = {
+  naperstki: ['Рынок · Напёрстки', 'Напёрсточник крутит три напёрстка. Угадал, где шарик, — +$125. Но рядом подставные, а шарик бывает… в рукаве.', 'Сыграть за $50'],
+  sauna: ['Сауна · Кто дольше', 'Сидишь в парилке с соседом. Вышел после него — +$120. Пересидел свой предел — отрубился, откачивание $50.', 'Зайти за $50'],
+  smuggle: ['Порт · Контрабанда', '20 секунд грузишь ящики на катер — по $20 за ящик (до 15). Прожектор патруля застал с ящиком — груз конфискуют. Розыск +1.', 'Грузить'],
+  appraise: ['Ломбард · Оценщик', 'Скупщик называет цену трёх вещей. Угадай, стоят они дороже или дешевле. Каждая верная — +$40, до первой ошибки.', 'Оценить'],
+  toast: ['Ресторан · Тост', 'Три фразы тоста — жми вовремя. Отличный тост: каждый за столом скинется по $20. Провал — проставишься всем по $10.', 'Сказать тост'],
+};
 function openSheet(q) {
   const key = JSON.stringify(q);
   if (key === sheetKey) return;
@@ -1483,6 +1572,19 @@ function openSheet(q) {
           : btns([['pay', `Заплатить $${q.rent}`], ['fight', 'Забить стрелку', 'red']]) +
             (q.crowd ? `<button class="btn crowd-btn" data-choice="crowd">${ic('fist')}Наезд толпой<small>${esc(q.ownerName)} самый богатый — позови братву: каждый вписавшийся +2 к силе</small></button>` : ''));
       break;
+    case 'MINI': {
+      const [t, d, b] = MINI_INFO[q.kind] || ['Мини-игра', '', 'Играть'];
+      html = head(cellIc(c), t, c.name, GROUPS[c.group]) + `<div class="hint mini-d">${d}</div>` + btns([['play', b, 'gold'], ['skip', 'Не сейчас']]);
+      break;
+    }
+    case 'CLUB': {
+      const own = q.owner && byId(q.owner);
+      html = head(cellIc(c), 'Клуб · Четыре бокала', 'Бармен ставит на стойку четыре бокала', GROUPS[c.group]) +
+        `<div class="gl-rules"><div><b class="gl-r ring">Перстень</b><span>+$240</span></div><div><b class="gl-r konyak">Коньяк</b><span>+$90</span></div><div><b class="gl-r vodka">Водка</b><span>+1 авторитет</span></div><div><b class="gl-r klof">Клофелин</b><span>обчистят на $80</span></div></div>` +
+        `<div class="hint">Бармен накроет бокалы и перетасует — следи за перстнем. Иногда он подменяет бокал${mp.char === 'shuler' ? ', но Шулера не проведёшь' : ''}. Вход $${q.fee}${own && own.id !== myId ? ` — получит хозяин Клуба, ${esc(own.name)}` : ''}.</div>` +
+        btns([['play', `Сыграть за $${q.fee}`, 'gold'], ['skip', 'Не сейчас']]);
+      break;
+    }
     case 'JAIL':
       html = head(ic('lock'), 'Ты в тюрьме', 'Сидишь один ход') +
         btns([['pay', `Залог $${q.bail} и бросить`, 'gold'], ['wait', 'Отсидеть ход']]);
@@ -1511,14 +1613,15 @@ function closeSheet() {
 
 // ---------- Таймер ----------
 function tickTimer() {
-  requestAnimationFrame(tickTimer);
+  // не крутим цикл 60 раз в секунду: в партии — 5 раз в секунду (полоска плавная за счёт CSS), вне партии — раз в секунду
+  setTimeout(tickTimer, screen === 'game' ? 200 : 1000);
   if (screen !== 'game' || !st) return;
   const bar = $('#timerbar'), sbar = $('#shbar');
   const frac = deadline && st.total ? Math.max(0, (deadline - Date.now()) / st.total) : 0;
   if (bar) { bar.style.transform = `scaleX(${frac})`; bar.parentElement.classList.toggle('low', frac > 0 && frac < 0.25); }
   if (sbar) sbar.style.transform = `scaleX(${frac})`;
 }
-requestAnimationFrame(tickTimer);
+tickTimer();
 
 // ---------- Инфо, меню, правила ----------
 function showCellInfo(id) {
@@ -1546,6 +1649,7 @@ function showMenu() {
     <button class="btn" data-a="tut">${ic('bolt')}Обучение</button>
     <button class="btn" data-a="tips">${ic('chat')}${tipsOff ? 'Включить подсказки' : 'Выключить подсказки'}</button>
     <button class="btn" data-a="sound">${SFX.on ? ic('mute') + 'Выключить звук' : ic('sound') + 'Включить звук'}</button>
+    <button class="btn" data-a="fx">${ic('bolt')}${LS.get('bratva_fx_off', false) ? 'Включить живое поле' : 'Экономия батареи: выключить живое поле'}</button>
     <button class="btn" data-a="link">${ic('link')}Ссылка на игру</button>
     <button class="btn red" data-a="quit">${ic('flag')}Сдаться и выйти</button>
   </div>`);
@@ -1559,6 +1663,7 @@ function showMenu() {
     if (a === 'tut') showTutorial(true);
     if (a === 'tips') { tipsOff = !tipsOff; LS.set('bratva_tips_off', tipsOff); if (!tipsOff) { tipsSeen.clear(); LS.set('bratva_tips', []); } toast(tipsOff ? 'Подсказки выключены' : 'Подсказки включены'); }
     if (a === 'sound') { SFX.on = !SFX.on; updSound(); }
+    if (a === 'fx') { const off = !LS.get('bratva_fx_off', false); LS.set('bratva_fx_off', off); if (window.BFX) { if (off) BFX.detach(); else BFX.attach($('#board'), () => st); } toast(off ? 'Живое поле выключено — телефон меньше греется' : 'Живое поле включено'); }
     if (a === 'link') copyText(`${shareUrl}/?room=${st.code}`);
     if (a === 'quit' && confirm('Точно сдаться? Твои точки уйдут банку.')) socket.emit('leave');
   });
@@ -1894,7 +1999,7 @@ Promise.race([assetsReady, new Promise((r) => setTimeout(r, 1200))]).then(() => 
   else setTimeout(() => { if (!screen) render(); }, 800);
 });
 // отладка сцен: ?fxdebug — открывает доступ к показу сцен для визуальной проверки
-if (/[?&]fxdebug\b/.test(location.search)) window.__dbg = { showFx: (x) => showFx(x), setSt: (x) => { st = x; }, crowd: () => updateCrowd(), setMe: (id) => { myId = id; } };
+if (/[?&]fxdebug\b/.test(location.search)) window.__dbg = { showFx: (x) => showFx(x), setSt: (x) => { st = x; }, crowd: () => updateCrowd(), setMe: (id) => { myId = id; }, sheet: (q) => { sheetKey = ''; openSheet(q); } };
 window.BR = {
   api, coinBurst, socket, LS, ident, ic, esc, avatar, toast, modal, flash, copyText, SFX: window.SFX,
   wallet: () => wallet, profile: () => profile, myName, needName,
